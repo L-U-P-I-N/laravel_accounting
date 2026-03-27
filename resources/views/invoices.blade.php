@@ -4,6 +4,9 @@
 
 @php
     $canManageInvoices = auth()->user()->hasPermission('manage_invoices');
+    $canViewReports = auth()->user()->hasPermission('view_reports');
+    $invoicesReportUrl = route('reports', ['report_type' => 'receivables']);
+    $invoicesReportPrintUrl = route('reports', ['report_type' => 'receivables', 'print' => 1]);
 @endphp
 
 @section('content')
@@ -13,11 +16,21 @@
         <h2 class="page-title"><i class="fas fa-file-invoice"></i> الفواتير</h2>
         <p class="text-muted mt-2 mb-0">إدارة فواتير المبيعات</p>
     </div>
-    @if ($canManageInvoices)
-        <a href="{{ route('invoices.create') }}" class="btn btn-gradient">
-            <i class="fas fa-plus ms-1"></i> إنشاء فاتورة جديدة
-        </a>
-    @endif
+    <div class="d-flex gap-2 flex-wrap">
+        @if ($canViewReports)
+            <a href="{{ $invoicesReportUrl }}" target="_blank" class="btn btn-outline-primary">
+                <i class="fas fa-table ms-1"></i> معاينة التقرير
+            </a>
+            <a href="{{ $invoicesReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
+                <i class="fas fa-print ms-1"></i> طباعة / PDF
+            </a>
+        @endif
+        @if ($canManageInvoices)
+            <a href="{{ route('invoices.create') }}" class="btn btn-gradient">
+                <i class="fas fa-plus ms-1"></i> إنشاء فاتورة جديدة
+            </a>
+        @endif
+    </div>
 </div>
 
 <div class="filter-tabs">
@@ -31,6 +44,50 @@
         @endforeach
     </ul>
 </div>
+
+@if ($canViewReports)
+    <div class="list-card mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <div>
+                <h5 class="mb-1">تقرير الفواتير</h5>
+                <p class="text-muted mb-0">اعرض الذمم المدينة لعميل محدد أو لفترة معينة مباشرة من صفحة الفواتير.</p>
+            </div>
+        </div>
+        <form method="GET" action="{{ route('reports') }}" target="_blank" class="row g-3 align-items-end">
+            <input type="hidden" name="report_type" value="receivables">
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">العميل</label>
+                <select name="customer_id" class="form-select">
+                    <option value="">كل العملاء</option>
+                    @foreach ($customers as $customer)
+                        <option value="{{ $customer->id }}">{{ $customer->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">الفترة</label>
+                <select name="period" class="form-select">
+                    <option value="monthly">شهري</option>
+                    <option value="quarterly">ربع سنوي</option>
+                    <option value="yearly">سنوي</option>
+                    <option value="custom">مخصص</option>
+                </select>
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">من تاريخ</label>
+                <input type="date" name="date_from" class="form-control">
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">إلى تاريخ</label>
+                <input type="date" name="date_to" class="form-control">
+            </div>
+            <div class="col-lg-3 col-md-6 d-flex gap-2">
+                <button type="submit" class="btn btn-primary flex-fill"><i class="fas fa-chart-bar ms-1"></i>فتح التقرير</button>
+                <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill"><i class="fas fa-print ms-1"></i>طباعة</button>
+            </div>
+        </form>
+    </div>
+@endif
 
 @if ($invoices->isNotEmpty())
     @foreach ($invoices as $invoice)

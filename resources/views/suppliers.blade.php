@@ -4,6 +4,9 @@
 
 @php
     $canManageSuppliers = auth()->user()->hasPermission('manage_suppliers');
+    $canViewReports = auth()->user()->hasPermission('view_reports');
+    $suppliersReportUrl = route('reports', ['report_type' => 'payables']);
+    $suppliersReportPrintUrl = route('reports', ['report_type' => 'payables', 'print' => 1]);
 @endphp
 
 @section('content')
@@ -17,11 +20,21 @@
         <h2 class="page-title"><i class="fas fa-truck"></i> الموردين</h2>
         <p class="text-muted mt-2 mb-0">إدارة قائمة الموردين</p>
     </div>
-    @if ($canManageSuppliers)
-        <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addSupplierModal">
-            <i class="fas fa-plus ms-1"></i> إضافة مورد جديد
-        </button>
-    @endif
+    <div class="d-flex gap-2 flex-wrap">
+        @if ($canViewReports)
+            <a href="{{ $suppliersReportUrl }}" target="_blank" class="btn btn-outline-primary">
+                <i class="fas fa-table ms-1"></i> معاينة التقرير
+            </a>
+            <a href="{{ $suppliersReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
+                <i class="fas fa-print ms-1"></i> طباعة / PDF
+            </a>
+        @endif
+        @if ($canManageSuppliers)
+            <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addSupplierModal">
+                <i class="fas fa-plus ms-1"></i> إضافة مورد جديد
+            </button>
+        @endif
+    </div>
 </div>
 
 @if (session('status'))
@@ -49,6 +62,50 @@
         </div>
     </div>
 </div>
+
+@if ($canViewReports)
+    <div class="list-card mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <div>
+                <h5 class="mb-1">تقرير الموردين</h5>
+                <p class="text-muted mb-0">فلترة الذمم الدائنة حسب مورد محدد أو فترة زمنية مباشرة من صفحة الموردين.</p>
+            </div>
+        </div>
+        <form method="GET" action="{{ route('reports') }}" target="_blank" class="row g-3 align-items-end">
+            <input type="hidden" name="report_type" value="payables">
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">المورد</label>
+                <select name="supplier_id" class="form-select">
+                    <option value="">كل الموردين</option>
+                    @foreach ($suppliers as $supplier)
+                        <option value="{{ $supplier->id }}">{{ $supplier->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">الفترة</label>
+                <select name="period" class="form-select">
+                    <option value="monthly">شهري</option>
+                    <option value="quarterly">ربع سنوي</option>
+                    <option value="yearly">سنوي</option>
+                    <option value="custom">مخصص</option>
+                </select>
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">من تاريخ</label>
+                <input type="date" name="date_from" class="form-control">
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">إلى تاريخ</label>
+                <input type="date" name="date_to" class="form-control">
+            </div>
+            <div class="col-lg-3 col-md-6 d-flex gap-2">
+                <button type="submit" class="btn btn-primary flex-fill"><i class="fas fa-chart-bar ms-1"></i>فتح التقرير</button>
+                <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill"><i class="fas fa-print ms-1"></i>طباعة</button>
+            </div>
+        </form>
+    </div>
+@endif
 
 @if ($suppliers->isNotEmpty())
     @foreach ($suppliers as $supplier)

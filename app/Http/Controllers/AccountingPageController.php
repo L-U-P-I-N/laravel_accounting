@@ -19,6 +19,7 @@ use App\Support\DocumentNumberGenerator;
 use App\Support\ReferenceGenerator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -54,7 +55,11 @@ class AccountingPageController extends Controller
             ->orderByDesc('invoice_date')
             ->get();
 
-        return view('invoices', compact('company', 'invoices', 'statusFilter', 'tabs'));
+        $customers = Customer::where('company_id', $company->id)
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return view('invoices', compact('company', 'invoices', 'statusFilter', 'tabs', 'customers'));
     }
 
     public function invoiceCreate(Request $request): View
@@ -483,8 +488,21 @@ class AccountingPageController extends Controller
     public function expenses(Request $request): View
     {
         $company = $this->company($request);
-        $expenses = Expense::with(['expenseAccount', 'paymentAccount', 'creator'])
-            ->where('company_id', $company->id)
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:255'],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'expense_account_id' => [
+                'nullable',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'expense_id' => [
+                'nullable',
+                Rule::exists('expenses', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+        ]);
+
+        $expenses = $this->expenseReportQuery($company->id, $filters)
             ->orderByDesc('expense_date')
             ->orderByDesc('id')
             ->get();
@@ -494,6 +512,11 @@ class AccountingPageController extends Controller
             ->where('is_active', true)
             ->orderBy('code')
             ->get();
+
+        $expenseTargets = Expense::where('company_id', $company->id)
+            ->orderByDesc('expense_date')
+            ->orderByDesc('id')
+            ->get(['id', 'name', 'reference', 'expense_date']);
 
         $paymentAccounts = Account::where('company_id', $company->id)
             ->whereIn('account_type', ['asset', 'liability'])
@@ -511,7 +534,68 @@ class AccountingPageController extends Controller
 
         $suggestedExpenseReference = $this->referenceGenerator->nextExpenseReference($company->id);
 
-        return view('expenses', compact('company', 'expenses', 'expenseAccounts', 'paymentAccounts', 'suggestedExpenseReference'));
+        return view('expenses', [
+            'company' => $company,
+            'expenses' => $expenses,
+            'expenseAccounts' => $expenseAccounts,
+            'paymentAccounts' => $paymentAccounts,
+            'suggestedExpenseReference' => $suggestedExpenseReference,
+            'expenseTargets' => $expenseTargets,
+            'filters' => [
+                'search' => (string) ($filters['search'] ?? ''),
+                'date_from' => (string) ($filters['date_from'] ?? ''),
+                'date_to' => (string) ($filters['date_to'] ?? ''),
+                'expense_account_id' => isset($filters['expense_account_id']) ? (int) $filters['expense_account_id'] : null,
+                'expense_id' => isset($filters['expense_id']) ? (int) $filters['expense_id'] : null,
+            ],
+        ]);
+    }
+
+    public function expensesReport(Request $request): View
+    {
+        $company = $this->company($request);
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:255'],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'expense_account_id' => [
+                'nullable',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'expense_id' => [
+                'nullable',
+                Rule::exists('expenses', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'print' => ['nullable', 'boolean'],
+        ]);
+
+        $expenses = $this->expenseReportQuery($company->id, $filters)
+            ->orderByDesc('expense_date')
+            ->orderByDesc('id')
+            ->get();
+
+        $summary = [
+            'count' => $expenses->count(),
+            'total' => (float) $expenses->sum('total'),
+            'tax' => (float) $expenses->sum('tax_amount'),
+            'average' => $expenses->isNotEmpty() ? (float) $expenses->avg('total') : 0.0,
+        ];
+
+        $filterSummary = array_values(array_filter([
+            ! empty($filters['search']) ? 'بحث: ' . $filters['search'] : null,
+            ! empty($filters['date_from']) ? 'من: ' . $filters['date_from'] : null,
+            ! empty($filters['date_to']) ? 'إلى: ' . $filters['date_to'] : null,
+            ! empty($filters['expense_account_id']) ? 'حساب المصروف: ' . optional(Account::find($filters['expense_account_id']))->name : null,
+            ! empty($filters['expense_id']) ? 'مصروف محدد: ' . optional(Expense::find($filters['expense_id']))->name : null,
+        ]));
+
+        return view('expenses_report', [
+            'company' => $company,
+            'expenses' => $expenses,
+            'summary' => $summary,
+            'filterSummary' => $filterSummary,
+            'printMode' => $request->boolean('print'),
+        ]);
     }
 
     public function storeExpense(Request $request): RedirectResponse
@@ -709,12 +793,54 @@ class AccountingPageController extends Controller
     public function journalEntries(Request $request): View
     {
         $company = $this->company($request);
-        $entries = JournalEntry::with('lines')
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:255'],
+            'status' => ['nullable', Rule::in(['draft', 'posted', 'reversed'])],
+            'account_id' => [
+                'nullable',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+        ]);
+
+        $entries = JournalEntry::with(['lines.account'])
             ->where('company_id', $company->id)
-            ->orderByDesc('created_at')
+            ->when(! empty($filters['search']), function ($query) use ($filters) {
+                $search = trim((string) $filters['search']);
+
+                $query->where(function ($nestedQuery) use ($search) {
+                    $nestedQuery->where('entry_number', 'like', '%' . $search . '%')
+                        ->orWhere('description', 'like', '%' . $search . '%')
+                        ->orWhere('reference', 'like', '%' . $search . '%');
+                });
+            })
+            ->when(! empty($filters['status']), fn ($query) => $query->where('status', $filters['status']))
+            ->when(! empty($filters['date_from']), fn ($query) => $query->whereDate('entry_date', '>=', $filters['date_from']))
+            ->when(! empty($filters['date_to']), fn ($query) => $query->whereDate('entry_date', '<=', $filters['date_to']))
+            ->when(! empty($filters['account_id']), function ($query) use ($filters) {
+                $query->whereHas('lines', fn ($linesQuery) => $linesQuery->where('account_id', $filters['account_id']));
+            })
+            ->orderByDesc('entry_date')
+            ->orderByDesc('id')
             ->get();
 
-        return view('journal_entries', compact('company', 'entries'));
+        $accounts = Account::where('company_id', $company->id)
+            ->orderBy('code')
+            ->get(['id', 'code', 'name', 'name_ar']);
+
+        return view('journal_entries', [
+            'company' => $company,
+            'entries' => $entries,
+            'accounts' => $accounts,
+            'filters' => [
+                'search' => (string) ($filters['search'] ?? ''),
+                'status' => (string) ($filters['status'] ?? ''),
+                'account_id' => isset($filters['account_id']) ? (int) $filters['account_id'] : null,
+                'date_from' => (string) ($filters['date_from'] ?? ''),
+                'date_to' => (string) ($filters['date_to'] ?? ''),
+            ],
+        ]);
     }
 
     public function journalEntryCreate(Request $request): View
@@ -769,32 +895,132 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
 
-        $totalRevenue = (float) Invoice::where('company_id', $company->id)
-            ->whereIn('status', ['sent', 'partial', 'paid'])
-            ->sum('total');
-        $totalExpenses = (float) Purchase::where('company_id', $company->id)
-            ->whereIn('status', ['approved', 'partial', 'paid'])
-            ->sum('total') + (float) Expense::where('company_id', $company->id)->sum('total');
-
-        $stats = [
-            'total_revenue' => $totalRevenue,
-            'total_expenses' => $totalExpenses,
-            'net_profit' => $totalRevenue - $totalExpenses,
-            'cash_flow' => $totalRevenue - $totalExpenses,
-            'avg_order_value' => (float) Invoice::where('company_id', $company->id)->avg('total'),
-            'total_customers' => Customer::where('company_id', $company->id)->count(),
-            'inventory_value' => 0.0,
-            'outstanding_receivables' => (float) Invoice::where('company_id', $company->id)->sum('balance_due'),
+        $reportTypes = [
+            'income_statement' => [
+                'label' => 'قائمة الدخل',
+                'description' => 'مقارنة الإيرادات بالمشتريات والمصروفات للوصول إلى صافي الربح.',
+                'focus' => null,
+            ],
+            'account_balances' => [
+                'label' => 'أرصدة الحسابات',
+                'description' => 'عرض حركة وأرصدة شجرة الحسابات أو حساب محدد.',
+                'focus' => 'account',
+            ],
+            'product_sales' => [
+                'label' => 'مبيعات المنتجات',
+                'description' => 'تحليل مبيعات كل المنتجات أو منتج محدد خلال فترة معينة.',
+                'focus' => 'product',
+            ],
+            'expense_details' => [
+                'label' => 'تفاصيل المصروفات',
+                'description' => 'تقرير بالمصروفات المسجلة أو مصروف محدد بالتفصيل.',
+                'focus' => 'expense',
+            ],
+            'receivables' => [
+                'label' => 'الذمم المدينة',
+                'description' => 'أرصدة العملاء المستحقة أو عميل محدد.',
+                'focus' => 'customer',
+            ],
+            'payables' => [
+                'label' => 'الذمم الدائنة',
+                'description' => 'أرصدة الموردين المستحقة أو مورد محدد.',
+                'focus' => 'supplier',
+            ],
         ];
 
-        $reportRows = [
-            ['label' => 'الإيرادات', 'value' => $stats['total_revenue']],
-            ['label' => 'المصروفات', 'value' => $stats['total_expenses']],
-            ['label' => 'صافي الربح', 'value' => $stats['net_profit']],
-            ['label' => 'الذمم المدينة', 'value' => $stats['outstanding_receivables']],
+        $periodOptions = [
+            'monthly' => 'شهري',
+            'quarterly' => 'ربع سنوي',
+            'yearly' => 'سنوي',
+            'custom' => 'مخصص',
         ];
 
-        return view('reports', compact('company', 'stats', 'reportRows'));
+        $validated = $request->validate([
+            'report_type' => ['nullable', Rule::in(array_keys($reportTypes))],
+            'period' => ['nullable', Rule::in(array_keys($periodOptions))],
+            'date_from' => [
+                'nullable',
+                'date',
+                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+            ],
+            'date_to' => [
+                'nullable',
+                'date',
+                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                'after_or_equal:date_from',
+            ],
+            'account_id' => [
+                'nullable',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'product_id' => [
+                'nullable',
+                Rule::exists('products', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'expense_id' => [
+                'nullable',
+                Rule::exists('expenses', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'customer_id' => [
+                'nullable',
+                Rule::exists('customers', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'supplier_id' => [
+                'nullable',
+                Rule::exists('suppliers', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'print' => ['nullable', 'boolean'],
+        ]);
+
+        $selectedReportType = $validated['report_type'] ?? 'income_statement';
+        $selectedPeriod = $validated['period'] ?? config('accounting.reports.default_period', 'monthly');
+        [$dateFrom, $dateTo] = $this->resolveReportRange(
+            $selectedPeriod,
+            $validated['date_from'] ?? null,
+            $validated['date_to'] ?? null,
+        );
+
+        $accounts = Account::where('company_id', $company->id)->orderBy('code')->get(['id', 'code', 'name', 'account_type']);
+        $products = Product::forCompany($company->id)->active()->orderBy('name')->get(['id', 'name', 'code']);
+        $expenses = Expense::where('company_id', $company->id)
+            ->orderByDesc('expense_date')
+            ->get(['id', 'name', 'reference', 'expense_date', 'total']);
+        $customers = Customer::where('company_id', $company->id)->orderBy('name')->get(['id', 'name']);
+        $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get(['id', 'name']);
+
+        $stats = $this->reportSummaryStats($company->id, $dateFrom, $dateTo);
+        $report = $this->buildReportData($company, $selectedReportType, $validated, $dateFrom, $dateTo, $reportTypes);
+        $reportRows = $report['rows'];
+
+        $viewData = [
+            'company' => $company,
+            'stats' => $stats,
+            'reportRows' => $reportRows,
+            'report' => $report,
+            'reportTypes' => $reportTypes,
+            'periodOptions' => $periodOptions,
+            'selectedReportType' => $selectedReportType,
+            'selectedPeriod' => $selectedPeriod,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'accounts' => $accounts,
+            'products' => $products,
+            'expenses' => $expenses,
+            'customers' => $customers,
+            'suppliers' => $suppliers,
+            'selectedAccountId' => isset($validated['account_id']) ? (int) $validated['account_id'] : null,
+            'selectedProductId' => isset($validated['product_id']) ? (int) $validated['product_id'] : null,
+            'selectedExpenseId' => isset($validated['expense_id']) ? (int) $validated['expense_id'] : null,
+            'selectedCustomerId' => isset($validated['customer_id']) ? (int) $validated['customer_id'] : null,
+            'selectedSupplierId' => isset($validated['supplier_id']) ? (int) $validated['supplier_id'] : null,
+            'printMode' => $request->boolean('print'),
+        ];
+
+        if ($request->boolean('print')) {
+            return view('reports_print', $viewData);
+        }
+
+        return view('reports', $viewData);
     }
 
     public function hr(Request $request): View
@@ -815,6 +1041,304 @@ class AccountingPageController extends Controller
         $countries = $this->countryConfigs();
 
         return view('settings', compact('company', 'accounts', 'taxSettings', 'countries'));
+    }
+
+    private function resolveReportRange(string $period, ?string $dateFrom, ?string $dateTo): array
+    {
+        return match ($period) {
+            'quarterly' => [now()->startOfQuarter(), now()->endOfQuarter()],
+            'yearly' => [now()->startOfYear(), now()->endOfYear()],
+            'custom' => [Carbon::parse((string) $dateFrom)->startOfDay(), Carbon::parse((string) $dateTo)->endOfDay()],
+            default => [now()->startOfMonth(), now()->endOfMonth()],
+        };
+    }
+
+    private function expenseReportQuery(int $companyId, array $filters)
+    {
+        return Expense::with(['expenseAccount', 'paymentAccount', 'creator'])
+            ->where('company_id', $companyId)
+            ->when(! empty($filters['search']), function ($query) use ($filters) {
+                $search = trim((string) $filters['search']);
+
+                $query->where(function ($nestedQuery) use ($search) {
+                    $nestedQuery->where('name', 'like', '%' . $search . '%')
+                        ->orWhere('reference', 'like', '%' . $search . '%')
+                        ->orWhere('description', 'like', '%' . $search . '%')
+                        ->orWhere('expense_number', 'like', '%' . $search . '%');
+                });
+            })
+            ->when(! empty($filters['date_from']), fn ($query) => $query->whereDate('expense_date', '>=', $filters['date_from']))
+            ->when(! empty($filters['date_to']), fn ($query) => $query->whereDate('expense_date', '<=', $filters['date_to']))
+            ->when(! empty($filters['expense_account_id']), fn ($query) => $query->where('expense_account_id', $filters['expense_account_id']))
+            ->when(! empty($filters['expense_id']), fn ($query) => $query->where('id', $filters['expense_id']));
+    }
+
+    private function reportSummaryStats(int $companyId, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $revenueQuery = Invoice::where('company_id', $companyId)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()]);
+        $purchaseQuery = Purchase::where('company_id', $companyId)
+            ->whereIn('status', ['approved', 'partial', 'paid'])
+            ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()]);
+        $expenseQuery = Expense::where('company_id', $companyId)
+            ->whereBetween('expense_date', [$dateFrom->toDateString(), $dateTo->toDateString()]);
+
+        $totalRevenue = (float) $revenueQuery->sum('total');
+        $totalExpenses = (float) $purchaseQuery->sum('total') + (float) $expenseQuery->sum('total');
+
+        return [
+            'total_revenue' => $totalRevenue,
+            'total_expenses' => $totalExpenses,
+            'net_profit' => $totalRevenue - $totalExpenses,
+            'cash_flow' => $totalRevenue - $totalExpenses,
+            'avg_order_value' => (float) Invoice::where('company_id', $companyId)
+                ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+                ->avg('total'),
+            'total_customers' => Customer::where('company_id', $companyId)->count(),
+            'inventory_value' => (float) Product::forCompany($companyId)->sum(DB::raw('stock_quantity * cost_price')),
+            'outstanding_receivables' => (float) Invoice::where('company_id', $companyId)->sum('balance_due'),
+        ];
+    }
+
+    private function buildReportData(Company $company, string $reportType, array $filters, Carbon $dateFrom, Carbon $dateTo, array $reportTypes): array
+    {
+        $report = match ($reportType) {
+            'account_balances' => $this->accountBalancesReport($company, $filters, $dateFrom, $dateTo),
+            'product_sales' => $this->productSalesReport($company, $filters, $dateFrom, $dateTo),
+            'expense_details' => $this->expenseDetailsReport($company, $filters, $dateFrom, $dateTo),
+            'receivables' => $this->receivablesReport($company, $filters, $dateFrom, $dateTo),
+            'payables' => $this->payablesReport($company, $filters, $dateFrom, $dateTo),
+            default => $this->incomeStatementReport($company, $dateFrom, $dateTo),
+        };
+
+        $report['type'] = $reportType;
+        $report['description'] = $reportTypes[$reportType]['description'];
+        $report['date_range_label'] = sprintf('من %s إلى %s', $dateFrom->format('Y-m-d'), $dateTo->format('Y-m-d'));
+
+        return $report;
+    }
+
+    private function incomeStatementReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $revenue = (float) Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('total');
+        $purchases = (float) Purchase::where('company_id', $company->id)
+            ->whereIn('status', ['approved', 'partial', 'paid'])
+            ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('total');
+        $expenses = (float) Expense::where('company_id', $company->id)
+            ->whereBetween('expense_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('total');
+        $netProfit = $revenue - $purchases - $expenses;
+
+        $rows = collect([
+            ['label' => 'إجمالي الإيرادات', 'value' => $revenue, 'meta' => 'فواتير المبيعات المعتمدة'],
+            ['label' => 'إجمالي المشتريات', 'value' => $purchases, 'meta' => 'المشتريات المعتمدة خلال الفترة'],
+            ['label' => 'إجمالي المصروفات', 'value' => $expenses, 'meta' => 'المصروفات المسجلة خلال الفترة'],
+            ['label' => 'صافي الربح', 'value' => $netProfit, 'meta' => 'الإيرادات - المشتريات - المصروفات'],
+        ]);
+
+        return [
+            'title' => 'قائمة الدخل',
+            'rows' => $rows,
+            'chart' => [
+                'type' => 'bar',
+                'labels' => $rows->pluck('label')->values(),
+                'values' => $rows->pluck('value')->map(fn ($value) => round((float) $value, 2))->values(),
+            ],
+            'highlights' => [
+                ['label' => 'الإيرادات', 'value' => $revenue],
+                ['label' => 'المصروفات الكلية', 'value' => $purchases + $expenses],
+                ['label' => 'صافي الربح', 'value' => $netProfit],
+            ],
+            'empty_message' => 'لا توجد بيانات كافية للفترة المختارة.',
+        ];
+    }
+
+    private function accountBalancesReport(Company $company, array $filters, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $selectedAccountId = isset($filters['account_id']) ? (int) $filters['account_id'] : null;
+        $rows = DB::table('journal_lines')
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->join('accounts', 'accounts.id', '=', 'journal_lines.account_id')
+            ->where('journal_entries.company_id', $company->id)
+            ->whereBetween('journal_entries.entry_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->when($selectedAccountId, fn ($query) => $query->where('accounts.id', $selectedAccountId))
+            ->groupBy('accounts.id', 'accounts.code', 'accounts.name', 'accounts.account_type')
+            ->selectRaw('accounts.id, accounts.code, accounts.name, accounts.account_type, SUM(journal_lines.debit) as debit_total, SUM(journal_lines.credit) as credit_total')
+            ->orderBy('accounts.code')
+            ->get()
+            ->map(function ($row) {
+                $isDebitAccount = in_array($row->account_type, ['asset', 'expense', 'cogs'], true);
+                $balance = $isDebitAccount
+                    ? ((float) $row->debit_total - (float) $row->credit_total)
+                    : ((float) $row->credit_total - (float) $row->debit_total);
+
+                return [
+                    'label' => trim($row->code . ' - ' . $row->name),
+                    'value' => $balance,
+                    'meta' => sprintf('مدين: %s | دائن: %s', number_format((float) $row->debit_total, 2), number_format((float) $row->credit_total, 2)),
+                ];
+            });
+
+        return [
+            'title' => $selectedAccountId ? 'تقرير حساب محدد' : 'أرصدة الحسابات',
+            'rows' => $rows,
+            'chart' => [
+                'type' => 'bar',
+                'labels' => $rows->pluck('label')->take(8)->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+            ],
+            'highlights' => [
+                ['label' => 'عدد الحسابات', 'value' => $rows->count()],
+                ['label' => 'إجمالي الأرصدة', 'value' => $rows->sum('value')],
+            ],
+            'empty_message' => 'لا توجد حركات حسابات خلال الفترة المحددة.',
+        ];
+    }
+
+    private function productSalesReport(Company $company, array $filters, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $selectedProductId = isset($filters['product_id']) ? (int) $filters['product_id'] : null;
+        $rows = Invoice::query()
+            ->join('invoice_items', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->leftJoin('products', 'products.id', '=', 'invoice_items.product_id')
+            ->where('invoices.company_id', $company->id)
+            ->whereIn('invoices.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoices.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->when($selectedProductId, fn ($query) => $query->where('products.id', $selectedProductId))
+            ->groupBy('products.id', 'products.name', 'invoice_items.description')
+            ->selectRaw('products.id, COALESCE(products.name, invoice_items.description) as label, SUM(invoice_items.quantity) as quantity_sold, SUM(invoice_items.total) as total_sales')
+            ->orderByDesc('total_sales')
+            ->get()
+            ->map(fn ($row) => [
+                'label' => $row->label,
+                'value' => (float) $row->total_sales,
+                'meta' => 'الكمية المباعة: ' . number_format((float) $row->quantity_sold, 2),
+            ]);
+
+        return [
+            'title' => $selectedProductId ? 'تقرير منتج محدد' : 'مبيعات المنتجات',
+            'rows' => $rows,
+            'chart' => [
+                'type' => 'bar',
+                'labels' => $rows->pluck('label')->take(8)->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+            ],
+            'highlights' => [
+                ['label' => 'عدد المنتجات', 'value' => $rows->count()],
+                ['label' => 'إجمالي المبيعات', 'value' => $rows->sum('value')],
+            ],
+            'empty_message' => 'لا توجد مبيعات منتجات وفق المعايير المختارة.',
+        ];
+    }
+
+    private function expenseDetailsReport(Company $company, array $filters, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $selectedExpenseId = isset($filters['expense_id']) ? (int) $filters['expense_id'] : null;
+        $rows = Expense::with('expenseAccount')
+            ->where('company_id', $company->id)
+            ->whereBetween('expense_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->when($selectedExpenseId, fn ($query) => $query->where('id', $selectedExpenseId))
+            ->orderByDesc('expense_date')
+            ->get()
+            ->map(fn (Expense $expense) => [
+                'label' => $expense->name ?: ($expense->reference ?: 'مصروف #' . $expense->id),
+                'value' => (float) $expense->total,
+                'meta' => trim(implode(' | ', array_filter([
+                    $expense->expense_date?->format('Y-m-d'),
+                    $expense->reference,
+                    $expense->expenseAccount?->name,
+                ]))),
+            ]);
+
+        return [
+            'title' => $selectedExpenseId ? 'تفاصيل مصروف محدد' : 'تفاصيل المصروفات',
+            'rows' => $rows,
+            'chart' => [
+                'type' => 'bar',
+                'labels' => $rows->pluck('label')->take(8)->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+            ],
+            'highlights' => [
+                ['label' => 'عدد المصروفات', 'value' => $rows->count()],
+                ['label' => 'إجمالي المصروفات', 'value' => $rows->sum('value')],
+            ],
+            'empty_message' => 'لا توجد مصروفات مطابقة للمعايير المختارة.',
+        ];
+    }
+
+    private function receivablesReport(Company $company, array $filters, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $selectedCustomerId = isset($filters['customer_id']) ? (int) $filters['customer_id'] : null;
+        $rows = Invoice::query()
+            ->join('customers', 'customers.id', '=', 'invoices.customer_id')
+            ->where('invoices.company_id', $company->id)
+            ->whereBetween('invoices.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->where('invoices.balance_due', '>', 0)
+            ->when($selectedCustomerId, fn ($query) => $query->where('customers.id', $selectedCustomerId))
+            ->groupBy('customers.id', 'customers.name')
+            ->selectRaw('customers.name as label, SUM(invoices.balance_due) as balance_due, COUNT(invoices.id) as invoice_count')
+            ->orderByDesc('balance_due')
+            ->get()
+            ->map(fn ($row) => [
+                'label' => $row->label,
+                'value' => (float) $row->balance_due,
+                'meta' => 'عدد الفواتير المفتوحة: ' . $row->invoice_count,
+            ]);
+
+        return [
+            'title' => $selectedCustomerId ? 'ذمم عميل محدد' : 'الذمم المدينة',
+            'rows' => $rows,
+            'chart' => [
+                'type' => 'bar',
+                'labels' => $rows->pluck('label')->take(8)->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+            ],
+            'highlights' => [
+                ['label' => 'عدد العملاء', 'value' => $rows->count()],
+                ['label' => 'إجمالي الذمم', 'value' => $rows->sum('value')],
+            ],
+            'empty_message' => 'لا توجد ذمم مدينة ضمن المعايير المختارة.',
+        ];
+    }
+
+    private function payablesReport(Company $company, array $filters, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $selectedSupplierId = isset($filters['supplier_id']) ? (int) $filters['supplier_id'] : null;
+        $rows = Purchase::query()
+            ->join('suppliers', 'suppliers.id', '=', 'purchases.supplier_id')
+            ->where('purchases.company_id', $company->id)
+            ->whereBetween('purchases.purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->where('purchases.balance_due', '>', 0)
+            ->when($selectedSupplierId, fn ($query) => $query->where('suppliers.id', $selectedSupplierId))
+            ->groupBy('suppliers.id', 'suppliers.name')
+            ->selectRaw('suppliers.name as label, SUM(purchases.balance_due) as balance_due, COUNT(purchases.id) as purchase_count')
+            ->orderByDesc('balance_due')
+            ->get()
+            ->map(fn ($row) => [
+                'label' => $row->label,
+                'value' => (float) $row->balance_due,
+                'meta' => 'عدد المشتريات المفتوحة: ' . $row->purchase_count,
+            ]);
+
+        return [
+            'title' => $selectedSupplierId ? 'ذمم مورد محدد' : 'الذمم الدائنة',
+            'rows' => $rows,
+            'chart' => [
+                'type' => 'bar',
+                'labels' => $rows->pluck('label')->take(8)->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+            ],
+            'highlights' => [
+                ['label' => 'عدد الموردين', 'value' => $rows->count()],
+                ['label' => 'إجمالي الذمم', 'value' => $rows->sum('value')],
+            ],
+            'empty_message' => 'لا توجد ذمم دائنة ضمن المعايير المختارة.',
+        ];
     }
 
     private function company(Request $request): Company

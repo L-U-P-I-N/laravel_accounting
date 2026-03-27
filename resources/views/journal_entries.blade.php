@@ -4,6 +4,16 @@
 
 @php
     $canManageJournalEntries = auth()->user()->hasPermission('manage_journal_entries');
+    $canViewReports = auth()->user()->hasPermission('view_reports');
+    $journalReportParams = array_filter([
+        'report_type' => 'account_balances',
+        'period' => ($filters['date_from'] !== '' || $filters['date_to'] !== '') ? 'custom' : 'monthly',
+        'account_id' => $filters['account_id'],
+        'date_from' => $filters['date_from'] !== '' ? $filters['date_from'] : null,
+        'date_to' => $filters['date_to'] !== '' ? $filters['date_to'] : null,
+    ], fn ($value) => $value !== null && $value !== '');
+    $journalEntriesReportUrl = route('reports', $journalReportParams);
+    $journalEntriesReportPrintUrl = route('reports', array_merge($journalReportParams, ['print' => 1]));
 @endphp
 
 @section('content')
@@ -12,26 +22,114 @@
         <h2 class="page-title"><i class="fas fa-book"></i> القيود المحاسبية</h2>
         <p class="text-muted mt-2 mb-0">إدارة القيود اليومية</p>
     </div>
-    @if ($canManageJournalEntries)
-        <a href="{{ route('journal_entries.create') }}" class="btn btn-gradient">
-            <i class="fas fa-plus ms-1"></i> إنشاء قيد جديد
-        </a>
-    @endif
+    <div class="d-flex gap-2 flex-wrap">
+        @if ($canViewReports)
+            <a href="{{ $journalEntriesReportUrl }}" target="_blank" class="btn btn-outline-primary">
+                <i class="fas fa-table ms-1"></i> معاينة التقرير
+            </a>
+            <a href="{{ $journalEntriesReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
+                <i class="fas fa-print ms-1"></i> طباعة / PDF
+            </a>
+        @endif
+        @if ($canManageJournalEntries)
+            <a href="{{ route('journal_entries.create') }}" class="btn btn-gradient">
+                <i class="fas fa-plus ms-1"></i> إنشاء قيد جديد
+            </a>
+        @endif
+    </div>
 </div>
 
 <div class="search-box">
-    <div class="row">
-        <div class="col-md-4 mb-3 mb-md-0">
+    <form method="GET" action="{{ route('journal_entries') }}" class="row g-3 align-items-end">
+        <div class="col-lg-3 col-md-6">
+            <label class="form-label">بحث</label>
             <div class="input-group">
                 <span class="input-group-text"><i class="fas fa-search"></i></span>
-                <input type="text" class="form-control" placeholder="البحث عن قيد..." id="searchInput">
+                <input type="text" class="form-control" placeholder="رقم القيد أو الوصف أو المرجع" id="searchInput" name="search" value="{{ $filters['search'] }}">
             </div>
         </div>
-        <div class="col-md-3 mb-3 mb-md-0"><select class="form-select"><option>جميع القيود</option><option>مسودة</option><option>مرحلة</option><option>مستعادة</option></select></div>
-        <div class="col-md-3 mb-3 mb-md-0"><input type="date" class="form-control"></div>
-        <div class="col-md-2"><input type="date" class="form-control"></div>
-    </div>
+        <div class="col-lg-2 col-md-6">
+            <label class="form-label">الحالة</label>
+            <select class="form-select" name="status">
+                <option value="" {{ $filters['status'] === '' ? 'selected' : '' }}>جميع القيود</option>
+                <option value="draft" {{ $filters['status'] === 'draft' ? 'selected' : '' }}>مسودة</option>
+                <option value="posted" {{ $filters['status'] === 'posted' ? 'selected' : '' }}>مرحلة</option>
+                <option value="reversed" {{ $filters['status'] === 'reversed' ? 'selected' : '' }}>مستعادة</option>
+            </select>
+        </div>
+        <div class="col-lg-3 col-md-6">
+            <label class="form-label">الحساب</label>
+            <select class="form-select" name="account_id">
+                <option value="">كل الحسابات</option>
+                @foreach ($accounts as $account)
+                    <option value="{{ $account->id }}" {{ $filters['account_id'] === $account->id ? 'selected' : '' }}>
+                        {{ $account->code }} - {{ $account->name_ar ?? $account->name }}
+                    </option>
+                @endforeach
+            </select>
+        </div>
+        <div class="col-lg-2 col-md-6">
+            <label class="form-label">من تاريخ</label>
+            <input type="date" class="form-control" name="date_from" value="{{ $filters['date_from'] }}">
+        </div>
+        <div class="col-lg-2 col-md-6">
+            <label class="form-label">إلى تاريخ</label>
+            <input type="date" class="form-control" name="date_to" value="{{ $filters['date_to'] }}">
+        </div>
+        <div class="col-lg-2 col-md-6 d-grid">
+            <button type="submit" class="btn btn-primary">تطبيق</button>
+        </div>
+        <div class="col-lg-2 col-md-6 d-grid">
+            <a href="{{ route('journal_entries') }}" class="btn btn-outline-secondary">إعادة تعيين</a>
+        </div>
+    </form>
 </div>
+
+@if ($canViewReports)
+    <div class="list-card mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <div>
+                <h5 class="mb-1">تقرير القيود والحسابات</h5>
+                <p class="text-muted mb-0">استخدم نفس الحساب والفترة المختارة لفتح تقرير أرصدة الحسابات أو طباعته مباشرة.</p>
+            </div>
+        </div>
+        <form method="GET" action="{{ route('reports') }}" target="_blank" class="row g-3 align-items-end">
+            <input type="hidden" name="report_type" value="account_balances">
+            <div class="col-lg-4 col-md-6">
+                <label class="form-label">الحساب</label>
+                <select class="form-select" name="account_id">
+                    <option value="">كل الحسابات</option>
+                    @foreach ($accounts as $account)
+                        <option value="{{ $account->id }}" {{ $filters['account_id'] === $account->id ? 'selected' : '' }}>
+                            {{ $account->code }} - {{ $account->name_ar ?? $account->name }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">الفترة</label>
+                <select name="period" class="form-select">
+                    <option value="monthly" {{ $filters['date_from'] === '' && $filters['date_to'] === '' ? 'selected' : '' }}>شهري</option>
+                    <option value="quarterly">ربع سنوي</option>
+                    <option value="yearly">سنوي</option>
+                    <option value="custom" {{ $filters['date_from'] !== '' || $filters['date_to'] !== '' ? 'selected' : '' }}>مخصص</option>
+                </select>
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">من تاريخ</label>
+                <input type="date" class="form-control" name="date_from" value="{{ $filters['date_from'] }}">
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">إلى تاريخ</label>
+                <input type="date" class="form-control" name="date_to" value="{{ $filters['date_to'] }}">
+            </div>
+            <div class="col-lg-2 col-md-6 d-flex gap-2">
+                <button type="submit" class="btn btn-primary flex-fill">فتح التقرير</button>
+                <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill">طباعة</button>
+            </div>
+        </form>
+    </div>
+@endif
 
 @if ($entries->isNotEmpty())
     @foreach ($entries as $entry)
@@ -115,14 +213,3 @@
 @endif
 @endsection
 
-@push('scripts')
-<script>
-document.getElementById('searchInput')?.addEventListener('keyup', function () {
-    const searchTerm = this.value.toLowerCase();
-    document.querySelectorAll('.journal-card').forEach((card) => {
-        const text = card.textContent.toLowerCase();
-        card.style.display = text.includes(searchTerm) ? 'block' : 'none';
-    });
-});
-</script>
-@endpush

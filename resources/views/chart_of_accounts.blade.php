@@ -4,6 +4,7 @@
 
 @php
     $canManageAccounts = auth()->user()->hasPermission('manage_accounts');
+    $canViewReports = auth()->user()->hasPermission('view_reports');
     $accountModalErrorFields = ['code', 'name', 'name_ar', 'account_type', 'parent_id', 'description'];
     $accountTypeOptions = [
         'asset' => 'أصل',
@@ -13,6 +14,8 @@
         'expense' => 'مصروف',
         'cogs' => 'تكلفة مباعة',
     ];
+    $accountsReportUrl = route('reports', ['report_type' => 'account_balances']);
+    $accountsReportPrintUrl = route('reports', ['report_type' => 'account_balances', 'print' => 1]);
 @endphp
 
 @push('styles')
@@ -71,11 +74,21 @@
         <h2 class="page-title"><i class="fas fa-sitemap"></i> شجرة الحسابات</h2>
         <p class="text-muted mt-2 mb-0">إدارة الحسابات المحاسبية</p>
     </div>
-    @if ($canManageAccounts)
-        <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addAccountModal">
-            <i class="fas fa-plus ms-1"></i> إضافة حساب جديد
-        </button>
-    @endif
+    <div class="d-flex gap-2 flex-wrap">
+        @if ($canViewReports)
+            <a href="{{ $accountsReportUrl }}" target="_blank" class="btn btn-outline-primary">
+                <i class="fas fa-table ms-1"></i> معاينة التقرير
+            </a>
+            <a href="{{ $accountsReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
+                <i class="fas fa-print ms-1"></i> طباعة / PDF
+            </a>
+        @endif
+        @if ($canManageAccounts)
+            <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addAccountModal">
+                <i class="fas fa-plus ms-1"></i> إضافة حساب جديد
+            </button>
+        @endif
+    </div>
 </div>
 
 <div class="row mb-4">
@@ -127,6 +140,53 @@
             </form>
         </div>
     </div>
+
+    @if ($canViewReports)
+        <div class="col-12 mb-3">
+            <div class="filter-card">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                    <div>
+                        <h5 class="mb-1">تقرير الأرصدة</h5>
+                        <p class="text-muted mb-0">فلترة تقرير أرصدة الحسابات حسب حساب محدد أو فترة زمنية من داخل شجرة الحسابات.</p>
+                    </div>
+                </div>
+
+                <form method="GET" action="{{ route('reports') }}" target="_blank" class="row g-3 align-items-end">
+                    <input type="hidden" name="report_type" value="account_balances">
+                    <div class="col-md-4">
+                        <label class="form-label">الحساب</label>
+                        <select name="account_id" class="form-select">
+                            <option value="">كل الحسابات</option>
+                            @foreach ($parentOptions as $accountOption)
+                                <option value="{{ $accountOption['id'] }}">{{ $accountOption['label'] }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">الفترة</label>
+                        <select name="period" class="form-select">
+                            <option value="monthly">شهري</option>
+                            <option value="quarterly">ربع سنوي</option>
+                            <option value="yearly">سنوي</option>
+                            <option value="custom">مخصص</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">من تاريخ</label>
+                        <input type="date" name="date_from" class="form-control">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">إلى تاريخ</label>
+                        <input type="date" name="date_to" class="form-control">
+                    </div>
+                    <div class="col-md-2 d-flex gap-2">
+                        <button type="submit" class="btn btn-primary flex-fill">فتح التقرير</button>
+                        <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill">طباعة</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
 
     @foreach (['asset' => 'أصول', 'liability' => 'خصوم', 'equity' => 'ملكية', 'revenue' => 'إيرادات', 'expense' => 'مصروفات', 'cogs' => 'تكلفة'] as $type => $label)
         <div class="col-md-2 mb-3 mb-md-0">

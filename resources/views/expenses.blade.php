@@ -13,14 +13,68 @@
             <h2 class="page-title"><i class="fas fa-receipt"></i> المصروفات</h2>
             <p class="text-muted mt-2 mb-0">تسجيل المصروفات باسم واضح وربطها مباشرة بحساب المصروف وحساب السداد في شجرة الحسابات.</p>
         </div>
-        <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addExpenseModal">
-            <i class="fas fa-plus ms-1"></i> إضافة مصروف
-        </button>
+        <div class="d-flex gap-2 flex-wrap">
+            <a href="{{ route('expenses.report', request()->query()) }}" target="_blank" class="btn btn-outline-primary">
+                <i class="fas fa-table ms-1"></i> معاينة التقرير
+            </a>
+            <a href="{{ route('expenses.report', array_merge(request()->query(), ['print' => 1])) }}" target="_blank" class="btn btn-outline-dark">
+                <i class="fas fa-print ms-1"></i> طباعة / PDF
+            </a>
+            <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addExpenseModal">
+                <i class="fas fa-plus ms-1"></i> إضافة مصروف
+            </button>
+        </div>
     </div>
 
     @if (session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>
     @endif
+
+    <div class="list-card mb-4">
+        <div class="card-header bg-transparent border-0 px-0 pt-0"><h5 class="mb-0">فلترة وطباعة تقرير المصروفات</h5></div>
+        <div class="card-body px-0 pb-0">
+            <form method="GET" action="{{ route('expenses') }}" class="row g-3 align-items-end">
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label">بحث</label>
+                    <input type="text" name="search" class="form-control" value="{{ $filters['search'] }}" placeholder="اسم المصروف أو المرجع">
+                </div>
+                <div class="col-lg-2 col-md-6">
+                    <label class="form-label">من تاريخ</label>
+                    <input type="date" name="date_from" class="form-control" value="{{ $filters['date_from'] }}">
+                </div>
+                <div class="col-lg-2 col-md-6">
+                    <label class="form-label">إلى تاريخ</label>
+                    <input type="date" name="date_to" class="form-control" value="{{ $filters['date_to'] }}">
+                </div>
+                <div class="col-lg-2 col-md-6">
+                    <label class="form-label">حساب المصروف</label>
+                    <select name="expense_account_id" class="form-select">
+                        <option value="">كل الحسابات</option>
+                        @foreach ($expenseAccounts as $account)
+                            <option value="{{ $account->id }}" {{ $filters['expense_account_id'] === $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label">مصروف محدد</label>
+                    <select name="expense_id" class="form-select">
+                        <option value="">كل المصروفات</option>
+                        @foreach ($expenseTargets as $expenseTarget)
+                            <option value="{{ $expenseTarget->id }}" {{ $filters['expense_id'] === $expenseTarget->id ? 'selected' : '' }}>
+                                {{ $expenseTarget->name ?: ($expenseTarget->reference ?: 'مصروف #' . $expenseTarget->id) }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="col-lg-2 col-md-6 d-grid">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-filter ms-1"></i>تطبيق</button>
+                </div>
+                <div class="col-lg-2 col-md-6 d-grid">
+                    <a href="{{ route('expenses') }}" class="btn btn-outline-secondary">إعادة تعيين</a>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <div class="row mb-4">
         <div class="col-md-4 mb-3 mb-md-0">

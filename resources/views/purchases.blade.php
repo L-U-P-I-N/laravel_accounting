@@ -4,6 +4,7 @@
 
 @php
     $canManagePurchases = auth()->user()->hasPermission('manage_purchases');
+    $canViewReports = auth()->user()->hasPermission('view_reports');
 @endphp
 
 @section('content')
@@ -17,15 +18,34 @@
             'paid' => 'مدفوع',
             'cancelled' => 'ملغي',
         ];
+        $purchasesReportParams = array_filter([
+            'report_type' => 'payables',
+            'supplier_id' => $supplierFilter !== '' ? $supplierFilter : null,
+            'date_from' => $dateFrom !== '' ? $dateFrom : null,
+            'date_to' => $dateTo !== '' ? $dateTo : null,
+        ], fn ($value) => $value !== null && $value !== '');
     @endphp
 
     <div class="page-header">
-        <h2 class="page-title"><i class="fas fa-shopping-cart"></i> المشتريات</h2>
-        @if ($canManagePurchases)
-            <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addPurchaseModal">
-                <i class="fas fa-plus ms-1"></i> إنشاء طلب شراء
-            </button>
-        @endif
+        <div>
+            <h2 class="page-title"><i class="fas fa-shopping-cart"></i> المشتريات</h2>
+            <p class="text-muted mt-2 mb-0">إدارة المشتريات مع ربط سريع بتقرير الدائنين والطباعة.</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            @if ($canViewReports)
+                <a href="{{ route('reports', $purchasesReportParams) }}" target="_blank" class="btn btn-outline-primary">
+                    <i class="fas fa-table ms-1"></i> معاينة التقرير
+                </a>
+                <a href="{{ route('reports', array_merge($purchasesReportParams, ['print' => 1])) }}" target="_blank" class="btn btn-outline-dark">
+                    <i class="fas fa-print ms-1"></i> طباعة / PDF
+                </a>
+            @endif
+            @if ($canManagePurchases)
+                <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addPurchaseModal">
+                    <i class="fas fa-plus ms-1"></i> إنشاء طلب شراء
+                </button>
+            @endif
+        </div>
     </div>
 
     @if (session('status'))
@@ -83,6 +103,56 @@
             </div>
         </div>
     </div>
+
+    @if ($canViewReports)
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="list-card">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                        <div>
+                            <h5 class="mb-1">تقرير المشتريات</h5>
+                            <p class="text-muted mb-0">أنشئ تقرير الذمم الدائنة من نفس الفلاتر أو غيّر المورد والفترة قبل فتحه.</p>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <form class="row g-3 align-items-end" method="GET" action="{{ route('reports') }}" target="_blank">
+                            <input type="hidden" name="report_type" value="payables">
+                            <div class="col-md-3">
+                                <label class="form-label">المورد</label>
+                                <select name="supplier_id" class="form-select">
+                                    <option value="">كل الموردين</option>
+                                    @foreach ($suppliers as $supplier)
+                                        <option value="{{ $supplier->id }}" {{ (string) $supplierFilter === (string) $supplier->id ? 'selected' : '' }}>{{ $supplier->name }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">الفترة</label>
+                                <select name="period" class="form-select">
+                                    <option value="monthly" {{ $dateFrom === '' && $dateTo === '' ? 'selected' : '' }}>شهري</option>
+                                    <option value="quarterly">ربع سنوي</option>
+                                    <option value="yearly">سنوي</option>
+                                    <option value="custom" {{ $dateFrom !== '' || $dateTo !== '' ? 'selected' : '' }}>مخصص</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">من تاريخ</label>
+                                <input type="date" class="form-control" name="date_from" value="{{ $dateFrom }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">إلى تاريخ</label>
+                                <input type="date" class="form-control" name="date_to" value="{{ $dateTo }}">
+                            </div>
+                            <div class="col-md-3 d-flex gap-2">
+                                <button type="submit" class="btn btn-primary flex-fill">فتح التقرير</button>
+                                <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill">طباعة</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
 
     <div class="row mb-4">
         <div class="col-md-3 mb-3 mb-md-0">
