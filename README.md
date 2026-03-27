@@ -47,7 +47,7 @@ A comprehensive accounting system migrated from Flask to Laravel, designed for s
 ### Prerequisites
 - PHP 8.2 or higher
 - Composer
-- SQLite database
+- MySQL database
 - Node.js & npm (for asset compilation)
 
 ### Setup Steps
@@ -71,10 +71,14 @@ A comprehensive accounting system migrated from Flask to Laravel, designed for s
    ```
 
 4. **Configure database**
-   Edit `.env` file for SQLite:
+   Edit `.env` file for MySQL:
    ```env
-   DB_CONNECTION=sqlite
-   DB_DATABASE=/opt/render/project/src/database/database.sqlite
+   DB_CONNECTION=mysql
+   DB_HOST=127.0.0.1
+   DB_PORT=3306
+   DB_DATABASE=accounting
+   DB_USERNAME=your_username
+   DB_PASSWORD=your_password
    ```
 
 5. **Run migrations**
@@ -161,32 +165,22 @@ This project is licensed under the MIT License.
 
 **Note**: This is a complete accounting system suitable for production use. Always ensure proper backups and security measures are in place when handling financial data.
 
-## Render Deployment With SQLite
+## InfinityFree Deployment
 
-Use the following settings on Render:
+InfinityFree uses Apache with MySQL, and the document root is typically `htdocs`. Use the guide in [INFINITYFREE_DEPLOYMENT.md](INFINITYFREE_DEPLOYMENT.md) to prepare the upload structure and database credentials.
 
-- Build Command: `composer install`
-- Start Command: `bash start.sh`
-
-The `start.sh` script will:
-
-- install Composer dependencies for production
-- create `database/database.sqlite` if it does not exist
-- generate `APP_KEY` only when missing
-- run migrations with `--force`
-- cache config, routes, and views
-- start PHP on `0.0.0.0:10000` with `public` as the document root
-
-Recommended environment values:
+Recommended production values:
 
 ```env
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://your-app.onrender.com
-DB_CONNECTION=sqlite
-DB_DATABASE=/opt/render/project/src/database/database.sqlite
+APP_URL=https://yourdomain.infinityfreeapp.com
+DB_CONNECTION=mysql
+DB_HOST=sqlXXX.infinityfree.com
+DB_PORT=3306
+DB_DATABASE=if0_12345678_accounting
+DB_USERNAME=if0_12345678
+DB_PASSWORD=your_mysql_password
 ```
 
-Because `.env` is gitignored, set these same values in Render environment variables as well. The startup script will fall back to `.env.example` only if `.env` is not present.
-
-If you deploy with SQLite on Render, keep in mind that `/opt/render/project/src` is not persistent across redeploys. For persistent production data, mount a Render disk and point `DB_DATABASE` to that disk path instead.
+For InfinityFree, upload the full Laravel app outside `htdocs`, upload the prepared `infinityfree/htdocs` files into `htdocs`, and make sure `storage` and `bootstrap/cache` remain writable.

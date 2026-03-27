@@ -63,6 +63,7 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:manage_accounts')->group(function () {
         Route::get('/chart-of-accounts', [AccountingPageController::class, 'chartOfAccounts'])->name('chart_of_accounts');
+        Route::post('/chart-of-accounts', [AccountingPageController::class, 'storeAccount'])->name('chart_of_accounts.store');
         Route::get('/expenses', [AccountingPageController::class, 'expenses'])->name('expenses');
         Route::post('/expenses', [AccountingPageController::class, 'storeExpense'])->name('expenses.store');
         Route::delete('/expenses/{expense}', [AccountingPageController::class, 'destroyExpense'])->name('expenses.destroy');

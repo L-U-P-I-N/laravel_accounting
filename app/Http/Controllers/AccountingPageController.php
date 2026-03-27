@@ -15,6 +15,8 @@ use App\Models\PurchaseItem;
 use App\Models\Supplier;
 use App\Models\TaxSetting;
 use App\Support\AccountingService;
+use App\Support\DocumentNumberGenerator;
+use App\Support\ReferenceGenerator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -26,7 +28,11 @@ use Illuminate\View\View;
 
 class AccountingPageController extends Controller
 {
-    public function __construct(private readonly AccountingService $accountingService)
+    public function __construct(
+        private readonly AccountingService $accountingService,
+        private readonly DocumentNumberGenerator $documentNumberGenerator,
+        private readonly ReferenceGenerator $referenceGenerator,
+    )
     {
     }
 
@@ -73,7 +79,7 @@ class AccountingPageController extends Controller
             $totals = $this->calculateInvoiceTotals($validated);
 
             $invoice = Invoice::create([
-                'invoice_number' => $this->nextInvoiceNumber($company->id),
+                'invoice_number' => $this->documentNumberGenerator->nextInvoiceNumber($company->id),
                 'customer_id' => $validated['customer_id'],
                 'company_id' => $company->id,
                 'invoice_date' => $validated['invoice_date'],
@@ -185,7 +191,7 @@ class AccountingPageController extends Controller
             $totals = $this->calculatePurchaseTotals($validated);
 
             $purchase = Purchase::create([
-                'purchase_number' => $this->nextPurchaseNumber($company->id),
+                'purchase_number' => $this->documentNumberGenerator->nextPurchaseNumber($company->id),
                 'supplier_id' => $validated['supplier_id'],
                 'company_id' => $company->id,
                 'purchase_date' => $validated['purchase_date'],
@@ -332,7 +338,9 @@ class AccountingPageController extends Controller
         $supplier->balance = (float) $supplier->purchases->sum('balance_due');
         $supplier->purchases_total = (float) $supplier->purchases->sum('total');
 
-        return view('supplier_show', compact('company', 'supplier'));
+        $suggestedPaymentReference = $this->referenceGenerator->nextSupplierPaymentReference($company->id);
+
+        return view('supplier_show', compact('company', 'supplier', 'suggestedPaymentReference'));
     }
 
     public function storeSupplier(Request $request): RedirectResponse
@@ -384,6 +392,7 @@ class AccountingPageController extends Controller
         $validated = $request->validate([
             'supplier_action' => ['nullable', 'string'],
             'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max($outstandingBalance, 0.01)],
+            'payment_reference' => ['nullable', 'string', 'max:100'],
         ], [
             'payment_amount.max' => 'مبلغ الدفع أكبر من الرصيد المستحق على المورد.',
         ]);
@@ -396,7 +405,11 @@ class AccountingPageController extends Controller
 
         /** @var \App\Models\User $user */
         $user = $request->user();
-        $paymentReference = 'SUP-PMT-' . now()->format('YmdHis');
+        $paymentReference = trim((string) ($validated['payment_reference'] ?? ''));
+
+        if ($paymentReference === '') {
+            $paymentReference = $this->referenceGenerator->nextSupplierPaymentReference($company->id);
+        }
 
         DB::transaction(function () use ($supplier, $paymentAmount, $user, $paymentReference) {
             $remainingAmount = $paymentAmount;
@@ -496,7 +509,9 @@ class AccountingPageController extends Controller
             ->orderBy('code')
             ->get();
 
-        return view('expenses', compact('company', 'expenses', 'expenseAccounts', 'paymentAccounts'));
+        $suggestedExpenseReference = $this->referenceGenerator->nextExpenseReference($company->id);
+
+        return view('expenses', compact('company', 'expenses', 'expenseAccounts', 'paymentAccounts', 'suggestedExpenseReference'));
     }
 
     public function storeExpense(Request $request): RedirectResponse
@@ -508,20 +523,26 @@ class AccountingPageController extends Controller
         $user = $request->user();
 
         DB::transaction(function () use ($validated, $company, $user) {
+            $expenseNumber = $this->documentNumberGenerator->nextExpenseNumber($company->id);
             $amount = round((float) $validated['amount'], 2);
             $taxRate = round((float) ($validated['tax_rate'] ?? 0), 2);
             $taxAmount = round($amount * ($taxRate / 100), 2);
             $total = round($amount + $taxAmount, 2);
+            $reference = trim((string) ($validated['reference'] ?? ''));
+
+            if ($reference === '') {
+                $reference = $this->referenceGenerator->fromIdentifier($expenseNumber);
+            }
 
             $expense = Expense::create([
-                'expense_number' => $this->nextExpenseNumber($company->id),
+                'expense_number' => $expenseNumber,
                 'company_id' => $company->id,
                 'expense_account_id' => $validated['expense_account_id'],
                 'payment_account_id' => $validated['payment_account_id'],
                 'created_by' => $user->id,
                 'expense_date' => $validated['expense_date'],
                 'name' => $validated['name'],
-                'reference' => $validated['reference'] ?? null,
+                'reference' => $reference,
                 'description' => $validated['description'] ?? null,
                 'amount' => $amount,
                 'tax_rate' => $taxRate,
@@ -603,12 +624,86 @@ class AccountingPageController extends Controller
     public function chartOfAccounts(Request $request): View
     {
         $company = $this->company($request);
-        $accounts = Account::with('children')
+        $allAccounts = Account::query()
             ->where('company_id', $company->id)
             ->orderBy('code')
             ->get();
 
-        return view('chart_of_accounts', compact('company', 'accounts'));
+        $accountFilters = [
+            'search' => trim($request->string('search')->toString()),
+            'account_type' => $request->string('account_type')->toString(),
+            'min_balance' => $request->string('min_balance')->toString(),
+            'max_balance' => $request->string('max_balance')->toString(),
+        ];
+
+        $hasAccountFilters = $this->hasAccountFilters($accountFilters);
+        $matchingAccounts = $this->filterAccounts($allAccounts, $accountFilters);
+        $accounts = $hasAccountFilters
+            ? $this->buildFilteredAccountTree($allAccounts, $matchingAccounts)
+            : $this->buildAccountTree($allAccounts);
+        $accountStats = $hasAccountFilters ? $matchingAccounts : $allAccounts;
+
+        $parentOptions = $allAccounts->map(fn (Account $account) => [
+            'id' => $account->id,
+            'code' => $account->code,
+            'label' => $account->code . ' - ' . $account->full_name,
+            'type' => $account->account_type,
+        ])->values();
+
+        $suggestedParentIds = $this->suggestedParentIds($allAccounts);
+
+        return view('chart_of_accounts', compact(
+            'company',
+            'accounts',
+            'accountStats',
+            'accountFilters',
+            'hasAccountFilters',
+            'matchingAccounts',
+            'parentOptions',
+            'suggestedParentIds'
+        ));
+    }
+
+    public function storeAccount(Request $request): RedirectResponse
+    {
+        $company = $this->company($request);
+        $validated = $this->validateAccountData($request, $company->id);
+
+        $suggestedParentId = $this->suggestedParentIdForType($company->id, $validated['account_type']);
+        $parentId = $validated['parent_id'] ?? $suggestedParentId;
+
+        if ($parentId) {
+            $parent = Account::query()
+                ->where('company_id', $company->id)
+                ->find($parentId);
+
+            if (! $parent) {
+                throw ValidationException::withMessages([
+                    'parent_id' => 'الحساب الأب المحدد غير موجود.',
+                ]);
+            }
+
+            if ($parent->id === ($validated['id'] ?? null)) {
+                throw ValidationException::withMessages([
+                    'parent_id' => 'لا يمكن ربط الحساب بنفسه.',
+                ]);
+            }
+        }
+
+        Account::create([
+            'company_id' => $company->id,
+            'code' => $validated['code'],
+            'name' => $validated['name'],
+            'name_ar' => $validated['name_ar'] ?? null,
+            'account_type' => $validated['account_type'],
+            'parent_id' => $parentId,
+            'description' => $validated['description'] ?? null,
+            'is_active' => $request->boolean('is_active', true),
+            'is_system' => false,
+            'balance' => 0,
+        ]);
+
+        return redirect()->route('chart_of_accounts')->with('status', 'تمت إضافة الحساب بنجاح.');
     }
 
     public function journalEntries(Request $request): View
@@ -626,9 +721,10 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
         $accounts = Account::where('company_id', $company->id)->orderBy('code')->get();
-        $nextEntryNumber = $this->accountingService->nextJournalEntryNumber($company->id);
+        $nextEntryNumber = $this->documentNumberGenerator->nextJournalEntryNumber($company->id);
+        $suggestedJournalReference = $this->referenceGenerator->nextJournalReference($company->id);
 
-        return view('journal_entry_form', compact('company', 'accounts', 'nextEntryNumber'));
+        return view('journal_entry_form', compact('company', 'accounts', 'nextEntryNumber', 'suggestedJournalReference'));
     }
 
     public function storeJournalEntry(Request $request): RedirectResponse
@@ -641,9 +737,15 @@ class AccountingPageController extends Controller
         $user = $request->user();
 
         $entry = DB::transaction(function () use ($company, $validated, $lines, $user) {
+            $reference = trim((string) ($validated['reference'] ?? ''));
+
+            if ($reference === '') {
+                $reference = $this->referenceGenerator->nextJournalReference($company->id);
+            }
+
             return $this->accountingService->createManualJournalEntry($company->id, $user, [
                 'entry_date' => $validated['entry_date'],
-                'reference' => $validated['reference'] ?? null,
+                'reference' => $reference,
                 'description' => $validated['description'],
                 'lines' => $lines,
             ]);
@@ -857,6 +959,148 @@ class AccountingPageController extends Controller
         ]);
     }
 
+    private function validateAccountData(Request $request, int $companyId): array
+    {
+        $uniqueCodeRule = Rule::unique('accounts', 'code')
+            ->where(fn ($query) => $query->where('company_id', $companyId));
+
+        return $request->validate([
+            'code' => ['required', 'string', 'max:20', $uniqueCodeRule],
+            'name' => ['required', 'string', 'max:200'],
+            'name_ar' => ['nullable', 'string', 'max:200'],
+            'account_type' => ['required', Rule::in(['asset', 'liability', 'equity', 'revenue', 'expense', 'cogs'])],
+            'parent_id' => [
+                'nullable',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+            ],
+            'description' => ['nullable', 'string'],
+            'is_active' => ['nullable', 'boolean'],
+        ]);
+    }
+
+    private function suggestedParentIds(Collection $accounts): array
+    {
+        $rootCodes = [
+            'asset' => '1000',
+            'liability' => '2000',
+            'equity' => '3000',
+            'revenue' => '4000',
+            'cogs' => '5000',
+            'expense' => '6000',
+        ];
+
+        $accountsByCode = $accounts->keyBy('code');
+        $suggestions = [];
+
+        foreach ($rootCodes as $type => $code) {
+            $suggestions[$type] = $accountsByCode->get($code)?->id;
+        }
+
+        return $suggestions;
+    }
+
+    private function hasAccountFilters(array $filters): bool
+    {
+        return $filters['search'] !== ''
+            || $filters['account_type'] !== ''
+            || $filters['min_balance'] !== ''
+            || $filters['max_balance'] !== '';
+    }
+
+    private function filterAccounts(Collection $accounts, array $filters): Collection
+    {
+        return $accounts->filter(function (Account $account) use ($filters) {
+            if ($filters['search'] !== '') {
+                $search = mb_strtolower($filters['search']);
+                $haystacks = [
+                    mb_strtolower($account->code),
+                    mb_strtolower($account->name),
+                    mb_strtolower((string) $account->name_ar),
+                ];
+
+                $matchesSearch = collect($haystacks)->contains(fn (string $value) => str_contains($value, $search));
+
+                if (! $matchesSearch) {
+                    return false;
+                }
+            }
+
+            if ($filters['account_type'] !== '' && $account->account_type !== $filters['account_type']) {
+                return false;
+            }
+
+            $balance = (float) $account->balance;
+
+            if ($filters['min_balance'] !== '' && $balance < (float) $filters['min_balance']) {
+                return false;
+            }
+
+            if ($filters['max_balance'] !== '' && $balance > (float) $filters['max_balance']) {
+                return false;
+            }
+
+            return true;
+        })->values();
+    }
+
+    private function buildAccountTree(Collection $accounts): Collection
+    {
+        return $this->nestAccounts($accounts, null);
+    }
+
+    private function buildFilteredAccountTree(Collection $allAccounts, Collection $matchingAccounts): Collection
+    {
+        $includedIds = [];
+        $accountsById = $allAccounts->keyBy('id');
+
+        foreach ($matchingAccounts as $account) {
+            $current = $account;
+
+            while ($current) {
+                $includedIds[$current->id] = true;
+                $current = $current->parent_id ? $accountsById->get($current->parent_id) : null;
+            }
+        }
+
+        return $this->nestAccounts($allAccounts->whereIn('id', array_keys($includedIds))->values(), null);
+    }
+
+    private function nestAccounts(Collection $accounts, ?int $parentId): Collection
+    {
+        return $accounts
+            ->where('parent_id', $parentId)
+            ->sortBy('code')
+            ->values()
+            ->map(function (Account $account) use ($accounts) {
+                $account->setRelation('children', $this->nestAccounts($accounts, $account->id));
+
+                return $account;
+            });
+    }
+
+    private function suggestedParentIdForType(int $companyId, string $type): ?int
+    {
+        $rootCodes = [
+            'asset' => '1000',
+            'liability' => '2000',
+            'equity' => '3000',
+            'revenue' => '4000',
+            'cogs' => '5000',
+            'expense' => '6000',
+        ];
+
+        $code = $rootCodes[$type] ?? null;
+
+        if (! $code) {
+            return null;
+        }
+
+        return Account::query()
+            ->where('company_id', $companyId)
+            ->where('code', $code)
+            ->value('id');
+    }
+
     private function supplierPayload(array $validated, int $companyId, ?Supplier $supplier = null): array
     {
         return [
@@ -1041,27 +1285,6 @@ class AccountingPageController extends Controller
                 'total' => round($lineSubtotal + $lineTax, 2),
             ]);
         }
-    }
-
-    private function nextPurchaseNumber(int $companyId): string
-    {
-        $count = Purchase::where('company_id', $companyId)->count() + 1;
-
-        return 'PUR-' . now()->format('Y') . '-' . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
-    }
-
-    private function nextInvoiceNumber(int $companyId): string
-    {
-        $count = Invoice::where('company_id', $companyId)->count() + 1;
-
-        return 'INV-' . now()->format('Y') . '-' . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
-    }
-
-    private function nextExpenseNumber(int $companyId): string
-    {
-        $count = Expense::where('company_id', $companyId)->count() + 1;
-
-        return 'EXP-' . now()->format('Y') . '-' . str_pad((string) $count, 4, '0', STR_PAD_LEFT);
     }
 
     private function normalizeJournalLines(array $validated, int $companyId): array

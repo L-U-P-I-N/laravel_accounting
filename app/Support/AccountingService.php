@@ -15,6 +15,11 @@ use RuntimeException;
 
 class AccountingService
 {
+    public function __construct(
+        private readonly DocumentNumberGenerator $documentNumberGenerator,
+    ) {
+    }
+
     public function syncInvoiceEntry(Invoice $invoice, User $user): JournalEntry
     {
         $invoice->loadMissing(['items.product', 'customer']);
@@ -243,7 +248,7 @@ class AccountingService
 
         $entry = new JournalEntry();
         $entry->fill([
-            'entry_number' => $this->nextJournalEntryNumber($companyId),
+            'entry_number' => $this->documentNumberGenerator->nextJournalEntryNumber($companyId),
             'entry_date' => $payload['entry_date'],
             'description' => $payload['description'],
             'reference' => $payload['reference'] ?? null,
@@ -290,9 +295,7 @@ class AccountingService
 
     public function nextJournalEntryNumber(int $companyId): string
     {
-        $count = JournalEntry::where('company_id', $companyId)->count() + 1;
-
-        return 'JRN-' . now()->format('Y') . '-' . str_pad((string) $count, 5, '0', STR_PAD_LEFT);
+        return $this->documentNumberGenerator->nextJournalEntryNumber($companyId);
     }
 
     private function syncJournalEntry(int $companyId, User $user, Model $source, string $entryType, string $description, ?string $reference, mixed $entryDate, Collection $lines): JournalEntry
@@ -356,7 +359,7 @@ class AccountingService
         $totals = $this->validateBalancedLines($lines);
 
         $entry->fill([
-            'entry_number' => $isNew ? $this->nextJournalEntryNumber($companyId) : $entry->entry_number,
+            'entry_number' => $isNew ? $this->documentNumberGenerator->nextJournalEntryNumber($companyId) : $entry->entry_number,
             'entry_date' => $entryDate,
             'description' => $description,
             'reference' => $reference,

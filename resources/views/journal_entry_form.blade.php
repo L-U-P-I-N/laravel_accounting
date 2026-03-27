@@ -101,7 +101,8 @@
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
                 <label class="form-label">المرجع</label>
-                <input type="text" name="reference" class="form-control" placeholder="رقم المستند أو المرجع" value="{{ old('reference') }}">
+                <input type="text" name="reference" class="form-control" placeholder="رقم المستند أو المرجع" value="{{ old('reference', $suggestedJournalReference) }}">
+                <small class="text-muted d-block mt-2">يتم توليد المرجع تلقائيًا ويمكنك تعديله إذا لزم.</small>
             </div>
             <div class="col-md-3">
                 <label class="form-label">الوصف *</label>

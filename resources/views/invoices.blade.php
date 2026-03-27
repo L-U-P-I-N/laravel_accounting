@@ -9,6 +9,7 @@
 @section('content')
 <div class="page-header">
     <div>
+
         <h2 class="page-title"><i class="fas fa-file-invoice"></i> الفواتير</h2>
         <p class="text-muted mt-2 mb-0">إدارة فواتير المبيعات</p>
     </div>

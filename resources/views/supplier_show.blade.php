@@ -219,6 +219,9 @@
 
                     <label class="form-label">مبلغ الدفع</label>
                     <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $supplier->balance, 2, '.', '') }}" step="0.01" value="{{ old('payment_amount') }}" required>
+                    <label class="form-label mt-3">المرجع</label>
+                    <input type="text" name="payment_reference" class="form-control" value="{{ old('payment_reference', $suggestedPaymentReference) }}">
+                    <small class="text-muted d-block mt-2">يتم توليد المرجع تلقائيًا ويمكنك تعديله إذا لزم.</small>
                     <small class="text-muted d-block mt-2">سيتم توزيع المبلغ تلقائياً على فواتير الشراء المفتوحة للمورد وخصمه من الرصيد المستحق.</small>
                 </div>
                 <div class="modal-footer">

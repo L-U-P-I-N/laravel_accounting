@@ -126,7 +126,11 @@
                     <div class="row g-3">
                         <div class="col-md-6"><label class="form-label">اسم المصروف</label><input type="text" name="name" class="form-control" value="{{ old('name') }}" required></div>
                         <div class="col-md-3"><label class="form-label">تاريخ المصروف</label><input type="date" name="expense_date" class="form-control" value="{{ old('expense_date', now()->format('Y-m-d')) }}" required></div>
-                        <div class="col-md-3"><label class="form-label">المرجع</label><input type="text" name="reference" class="form-control" value="{{ old('reference') }}"></div>
+                        <div class="col-md-3">
+                            <label class="form-label">المرجع</label>
+                            <input type="text" name="reference" class="form-control" value="{{ old('reference', $suggestedExpenseReference) }}">
+                            <div class="form-text">يتم توليد المرجع تلقائيًا ويمكنك تعديله إذا لزم.</div>
+                        </div>
                         <div class="col-md-6"><label class="form-label">حساب المصروف</label><select name="expense_account_id" class="form-select" required><option value="">اختر الحساب</option>@foreach ($expenseAccounts as $account)<option value="{{ $account->id }}" {{ (string) old('expense_account_id') === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>@endforeach</select></div>
                         <div class="col-md-6"><label class="form-label">حساب السداد</label><select name="payment_account_id" class="form-select" required><option value="">اختر الحساب</option>@foreach ($paymentAccounts as $account)<option value="{{ $account->id }}" {{ (string) old('payment_account_id') === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>@endforeach</select></div>
                         <div class="col-md-4"><label class="form-label">المبلغ قبل الضريبة</label><input type="number" name="amount" class="form-control" min="0.01" step="0.01" value="{{ old('amount') }}" required></div>
