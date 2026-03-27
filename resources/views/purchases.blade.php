@@ -241,6 +241,9 @@
                                         <button type="button" class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#showPurchaseModal{{ $purchase->id }}" title="عرض التفاصيل">
                                             <i class="fas fa-eye"></i>
                                         </button>
+                                        <a href="{{ route('purchases.print', $purchase) }}" target="_blank" class="btn btn-sm btn-outline-dark" title="طباعة الطلب">
+                                            <i class="fas fa-print"></i>
+                                        </a>
                                         @if ($canManagePurchases)
                                             <button type="button" class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editPurchaseModal{{ $purchase->id }}" title="تعديل الطلب">
                                                 <i class="fas fa-edit"></i>
@@ -287,7 +290,14 @@
             <div class="modal-dialog modal-xl modal-fullscreen-sm-down">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title">تفاصيل طلب الشراء {{ $purchase->purchase_number }}</h5>
+                        <div>
+                            <h5 class="modal-title">تفاصيل طلب الشراء {{ $purchase->purchase_number }}</h5>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 me-auto">
+                            <a href="{{ route('purchases.print', $purchase) }}" target="_blank" class="btn btn-outline-dark btn-sm">
+                                <i class="fas fa-print ms-1"></i> طباعة
+                            </a>
+                        </div>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
@@ -306,7 +316,8 @@
                                         <th>الوصف</th>
                                         <th>الكمية</th>
                                         <th>سعر الحبة</th>
-                                        <th>الضريبة</th>
+                                        <th>نسبة الضريبة</th>
+                                        <th>المبلغ الضريبي</th>
                                         <th>الإجمالي</th>
                                     </tr>
                                 </thead>
@@ -317,6 +328,7 @@
                                             <td>{{ $item->description ?: '-' }}</td>
                                             <td>{{ number_format((float) $item->quantity, 2) }}</td>
                                             <td>{{ number_format((float) $item->unit_price, 2) }} {{ $company->currency }}</td>
+                                            <td>{{ number_format((float) $item->tax_rate, 2) }}%</td>
                                             <td>{{ number_format((float) $item->tax_amount, 2) }} {{ $company->currency }}</td>
                                             <td>{{ number_format((float) $item->total, 2) }} {{ $company->currency }}</td>
                                         </tr>
@@ -420,6 +432,7 @@
                                                 <th>الكمية</th>
                                                 <th>سعر البيع</th>
                                                 <th>الضريبة %</th>
+                                                <th>المبلغ الضريبي</th>
                                                 <th>الإجمالي</th>
                                                 <th></th>
                                             </tr>
@@ -431,7 +444,7 @@
                                                         <select name="item_product_id[]" class="form-select purchase-product-select">
                                                             <option value="">اختر المنتج</option>
                                                             @foreach ($products as $product)
-                                                                <option value="{{ $product->id }}" data-supplier-id="{{ $product->supplier_id ?? '' }}" data-description="{{ $product->description ?? '' }}" data-sell-price="{{ $product->sell_price ?? 0 }}" {{ (string) $item->product_id === (string) $product->id ? 'selected' : '' }}>{{ $product->name }}</option>
+                                                                <option value="{{ $product->id }}" data-supplier-id="{{ $product->supplier_id ?? '' }}" data-description="{{ $product->description ?? '' }}" data-sell-price="{{ $product->sell_price ?? 0 }}" data-tax-rate="{{ $product->tax_rate ?? 0 }}" {{ (string) $item->product_id === (string) $product->id ? 'selected' : '' }}>{{ $product->name }}</option>
                                                             @endforeach
                                                         </select>
                                                     </td>
@@ -439,6 +452,7 @@
                                                     <td><input type="number" name="item_quantity[]" class="form-control purchase-item-quantity" min="0.01" step="0.01" value="{{ $item->quantity }}"></td>
                                                     <td><input type="number" name="item_price[]" class="form-control purchase-item-price" min="0" step="0.01" value="{{ $item->unit_price }}"></td>
                                                     <td><input type="number" name="item_tax_rate[]" class="form-control purchase-item-tax" min="0" max="100" step="0.01" value="{{ $item->tax_rate ?? 0 }}"></td>
+                                                    <td><input type="text" class="form-control purchase-item-tax-amount" readonly></td>
                                                     <td><input type="text" class="form-control purchase-item-total" readonly></td>
                                                     <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-purchase-item><i class="fas fa-trash"></i></button></td>
                                                 </tr>
@@ -527,6 +541,7 @@
                                         <th>الكمية</th>
                                         <th>سعر البيع</th>
                                         <th>الضريبة %</th>
+                                        <th>المبلغ الضريبي</th>
                                         <th>الإجمالي</th>
                                         <th></th>
                                     </tr>
@@ -549,7 +564,7 @@
                                                 <select name="item_product_id[]" class="form-select purchase-product-select">
                                                     <option value="">اختر المنتج</option>
                                                     @foreach ($products as $product)
-                                                        <option value="{{ $product->id }}" data-supplier-id="{{ $product->supplier_id ?? '' }}" data-description="{{ $product->description ?? '' }}" data-sell-price="{{ $product->sell_price ?? 0 }}" {{ (string) $item->product_id === (string) $product->id ? 'selected' : '' }}>{{ $product->name }}</option>
+                                                        <option value="{{ $product->id }}" data-supplier-id="{{ $product->supplier_id ?? '' }}" data-description="{{ $product->description ?? '' }}" data-sell-price="{{ $product->sell_price ?? 0 }}" data-tax-rate="{{ $product->tax_rate ?? 0 }}" {{ (string) $item->product_id === (string) $product->id ? 'selected' : '' }}>{{ $product->name }}</option>
                                                     @endforeach
                                                 </select>
                                             </td>
@@ -557,6 +572,7 @@
                                             <td><input type="number" name="item_quantity[]" class="form-control purchase-item-quantity" min="0.01" step="0.01" value="{{ $item->quantity }}"></td>
                                             <td><input type="number" name="item_price[]" class="form-control purchase-item-price" min="0" step="0.01" value="{{ $item->unit_price }}"></td>
                                             <td><input type="number" name="item_tax_rate[]" class="form-control purchase-item-tax" min="0" max="100" step="0.01" value="{{ $item->tax_rate }}"></td>
+                                            <td><input type="text" class="form-control purchase-item-tax-amount" readonly></td>
                                             <td><input type="text" class="form-control purchase-item-total" readonly></td>
                                             <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-purchase-item><i class="fas fa-trash"></i></button></td>
                                         </tr>
@@ -606,6 +622,12 @@ function calculatePurchaseFormTotals(form) {
         taxAmount += lineTax;
 
         const totalField = row.querySelector('.purchase-item-total');
+        const taxAmountField = row.querySelector('.purchase-item-tax-amount');
+
+        if (taxAmountField) {
+            taxAmountField.value = lineTax.toFixed(2);
+        }
+
         if (totalField) {
             totalField.value = lineTotal.toFixed(2);
         }
@@ -633,6 +655,7 @@ function applySelectedPurchaseProduct(row, form) {
     const select = row.querySelector('.purchase-product-select');
     const descriptionInput = row.querySelector('.purchase-item-description');
     const priceInput = row.querySelector('.purchase-item-price');
+    const taxInput = row.querySelector('.purchase-item-tax');
     const supplierSelect = form.querySelector('.purchase-supplier-select');
 
     if (!select) {
@@ -648,7 +671,9 @@ function applySelectedPurchaseProduct(row, form) {
 
     const productDescription = selectedOption.dataset.description || selectedOption.textContent.trim();
     const productPrice = selectedOption.dataset.sellPrice || '';
+    const productTaxRate = selectedOption.dataset.taxRate || '0';
     const currentPrice = purchaseNumericValue(priceInput?.value);
+    const currentTaxRate = purchaseNumericValue(taxInput?.value);
 
     if (descriptionInput && (!descriptionInput.value || descriptionInput.dataset.autoFilled === 'true')) {
         descriptionInput.value = productDescription;
@@ -658,6 +683,11 @@ function applySelectedPurchaseProduct(row, form) {
     if (priceInput && (!priceInput.value || currentPrice === 0 || priceInput.dataset.autoFilled === 'true')) {
         priceInput.value = productPrice;
         priceInput.dataset.autoFilled = 'true';
+    }
+
+    if (taxInput && (!taxInput.value || currentTaxRate === 0 || taxInput.dataset.autoFilled === 'true')) {
+        taxInput.value = productTaxRate;
+        taxInput.dataset.autoFilled = 'true';
     }
 
     if (supplierSelect && selectedOption.dataset.supplierId) {
@@ -671,6 +701,7 @@ function bindPurchaseRow(row, form) {
     const select = row.querySelector('.purchase-product-select');
     const descriptionInput = row.querySelector('.purchase-item-description');
     const priceInput = row.querySelector('.purchase-item-price');
+    const taxInput = row.querySelector('.purchase-item-tax');
     const supplierSelect = form.querySelector('.purchase-supplier-select');
     const removeButton = row.querySelector('[data-remove-purchase-item]');
 
@@ -685,7 +716,12 @@ function bindPurchaseRow(row, form) {
         calculatePurchaseFormTotals(form);
     });
 
-    row.querySelectorAll('.purchase-item-quantity, .purchase-item-tax').forEach((input) => {
+    taxInput?.addEventListener('input', () => {
+        taxInput.dataset.autoFilled = 'false';
+        calculatePurchaseFormTotals(form);
+    });
+
+    row.querySelectorAll('.purchase-item-quantity').forEach((input) => {
         input.addEventListener('input', () => calculatePurchaseFormTotals(form));
     });
 
@@ -718,6 +754,8 @@ function addPurchaseRow(form) {
             input.value = '1';
         } else if (input.classList.contains('purchase-item-tax')) {
             input.value = '15';
+        } else if (input.classList.contains('purchase-item-tax-amount')) {
+            input.value = '0.00';
         } else if (input.classList.contains('purchase-item-total')) {
             input.value = '0.00';
         } else {

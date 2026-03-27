@@ -35,6 +35,7 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:manage_purchases')->group(function () {
         Route::get('/purchases', [AccountingPageController::class, 'purchases'])->name('purchases');
+        Route::get('/purchases/{purchase}/print', [AccountingPageController::class, 'purchasePrint'])->name('purchases.print');
         Route::post('/purchases', [AccountingPageController::class, 'storePurchase'])->name('purchases.store');
         Route::put('/purchases/{purchase}', [AccountingPageController::class, 'updatePurchase'])->name('purchases.update');
         Route::patch('/purchases/{purchase}/approve', [AccountingPageController::class, 'approvePurchase'])->name('purchases.approve');
@@ -43,6 +44,10 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:manage_customers')->group(function () {
         Route::get('/customers', [AccountingPageController::class, 'customers'])->name('customers');
+        Route::get('/customers/{customer}', [AccountingPageController::class, 'showCustomer'])->name('customers.show');
+        Route::post('/customers', [AccountingPageController::class, 'storeCustomer'])->name('customers.store');
+        Route::put('/customers/{customer}', [AccountingPageController::class, 'updateCustomer'])->name('customers.update');
+        Route::delete('/customers/{customer}', [AccountingPageController::class, 'destroyCustomer'])->name('customers.destroy');
     });
 
     Route::middleware('permission:manage_suppliers')->group(function () {
@@ -87,6 +92,8 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:manage_settings')->group(function () {
         Route::get('/settings', [AccountingPageController::class, 'settings'])->name('settings');
+        Route::put('/settings/company', [AccountingPageController::class, 'updateCompanySettings'])->name('settings.company.update');
+        Route::put('/settings/taxes', [AccountingPageController::class, 'updateTaxSettings'])->name('settings.taxes.update');
     });
 
     Route::middleware('permission:manage_users')->group(function () {

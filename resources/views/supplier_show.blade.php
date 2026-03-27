@@ -12,6 +12,9 @@
         'cancelled' => 'ملغي',
     ];
     $paymentModalHasErrors = $errors->any() && old('supplier_action') === 'payment';
+    $supplierCountryLabel = $supplier->country ?: ($companyCountry['name_ar'] ?? '-');
+    $supplierCityLabel = $supplier->city ?: '-';
+    $hasOutstandingSupplierBalance = (float) $supplier->balance > 0;
 @endphp
 
 @section('content')
@@ -84,8 +87,11 @@
                     <div class="col-md-6"><strong>الهاتف</strong><div class="text-muted mt-1">{{ $supplier->phone ?: '-' }}</div></div>
                     <div class="col-md-6"><strong>الجوال</strong><div class="text-muted mt-1">{{ $supplier->mobile ?: '-' }}</div></div>
                     <div class="col-md-6"><strong>الرقم الضريبي</strong><div class="text-muted mt-1">{{ $supplier->tax_number ?: '-' }}</div></div>
-                    <div class="col-md-6"><strong>المدينة</strong><div class="text-muted mt-1">{{ $supplier->city ?: '-' }}</div></div>
-                    <div class="col-md-6"><strong>الدولة</strong><div class="text-muted mt-1">{{ $supplier->country ?: '-' }}</div></div>
+                    <div class="col-md-12">
+                        <strong>الموقع</strong>
+                        <div class="text-muted mt-1">المدينة: {{ $supplierCityLabel }}</div>
+                        <div class="text-muted">الدولة: {{ $supplierCountryLabel }}</div>
+                    </div>
                     <div class="col-md-6"><strong>الحد الائتماني</strong><div class="text-muted mt-1">{{ number_format((float) $supplier->credit_limit, 2) }} {{ $company->currency }}</div></div>
                     <div class="col-12"><strong>العنوان</strong><div class="text-muted mt-1">{{ $supplier->address ?: '-' }}</div></div>
                 </div>
@@ -221,8 +227,10 @@
                     <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $supplier->balance, 2, '.', '') }}" step="0.01" value="{{ old('payment_amount') }}" required>
                     <label class="form-label mt-3">المرجع</label>
                     <input type="text" name="payment_reference" class="form-control" value="{{ old('payment_reference', $suggestedPaymentReference) }}">
+                    <label class="form-label mt-3">حالة الدفع</label>
+                    <input type="text" class="form-control" value="{{ $hasOutstandingSupplierBalance ? 'تُحتسب تلقائياً حسب الفواتير المفتوحة' : 'لا توجد فواتير مستحقة حالياً' }}" readonly>
                     <small class="text-muted d-block mt-2">يتم توليد المرجع تلقائيًا ويمكنك تعديله إذا لزم.</small>
-                    <small class="text-muted d-block mt-2">سيتم توزيع المبلغ تلقائياً على فواتير الشراء المفتوحة للمورد وخصمه من الرصيد المستحق.</small>
+                    <small class="text-muted d-block mt-2">لا توجد خانة مستقلة لحالة الدفع لأن النظام يوزّع المبلغ تلقائياً على فواتير الشراء المفتوحة ثم يحدد كل فاتورة كمعلقة أو مدفوعة جزئياً أو مدفوعة بالكامل.</small>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>

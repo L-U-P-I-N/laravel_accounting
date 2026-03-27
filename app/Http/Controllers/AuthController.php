@@ -42,14 +42,23 @@ class AuthController extends Controller
             'last_name' => 'required|string|max:50',
             'company_name' => 'required|string|max:200',
             'country_code' => 'required|string|max:5',
+            'city' => 'required|string|max:100',
         ]);
 
         $taxConfigs = $this->getTaxConfigs();
         $taxConfig = $taxConfigs[$request->country_code] ?? $taxConfigs['SA'];
+        $allowedCities = $taxConfig['cities'] ?? [];
+
+        if ($allowedCities !== [] && ! in_array($request->city, $allowedCities, true)) {
+            return back()
+                ->withErrors(['city' => 'المدينة المحددة لا تتبع الدولة المختارة.'])
+                ->withInput($request->except('password', 'password_confirmation'));
+        }
 
         // Create company
         $company = Company::create([
             'name' => $request->company_name,
+            'city' => $request->city,
             'country_code' => $request->country_code,
             'currency' => $taxConfig['currency'],
             'subscription_plan' => 'basic',
@@ -80,17 +89,31 @@ class AuthController extends Controller
 
         // Create default tax settings
         if ($taxConfig['vat_rate'] > 0) {
-            $vatAccount = Account::where('code', '2300')
+            $vatOutputAccount = Account::where('code', '2300')
+                ->where('company_id', $company->id)
+                ->first();
+
+            $vatInputAccount = Account::where('code', '2310')
                 ->where('company_id', $company->id)
                 ->first();
 
             TaxSetting::create([
                 'tax_name' => 'VAT',
-                'tax_name_ar' => 'ضريبة القيمة المضافة',
-                'tax_type' => 'vat',
+                'tax_name_ar' => 'ضريبة المخرجات',
+                'tax_type' => 'output_vat',
                 'rate' => $taxConfig['vat_rate'],
                 'is_default' => true,
-                'account_id' => $vatAccount?->id,
+                'account_id' => $vatOutputAccount?->id,
+                'company_id' => $company->id,
+            ]);
+
+            TaxSetting::create([
+                'tax_name' => 'Input VAT',
+                'tax_name_ar' => 'ضريبة المدخلات',
+                'tax_type' => 'input_vat',
+                'rate' => $taxConfig['vat_rate'],
+                'is_default' => false,
+                'account_id' => $vatInputAccount?->id,
                 'company_id' => $company->id,
             ]);
         }
@@ -172,6 +195,7 @@ class AuthController extends Controller
                 'name' => 'Saudi Arabia',
                 'name_ar' => 'المملكة العربية السعودية',
                 'currency' => 'SAR',
+                'cities' => ['الرياض', 'جدة', 'مكة المكرمة', 'المدينة المنورة', 'الدمام', 'الخبر', 'الظهران', 'الطائف', 'أبها', 'تبوك'],
                 'vat_rate' => 15.0,
                 'tax_number_label' => 'الرقم الضريبي',
                 'tax_number_format' => '/^\d{15}$/',
@@ -182,6 +206,7 @@ class AuthController extends Controller
                 'name' => 'UAE',
                 'name_ar' => 'الإمارات العربية المتحدة',
                 'currency' => 'AED',
+                'cities' => ['دبي', 'أبوظبي', 'الشارقة', 'عجمان', 'رأس الخيمة', 'الفجيرة', 'أم القيوين', 'العين'],
                 'vat_rate' => 5.0,
                 'tax_number_label' => 'TRN',
                 'tax_number_format' => '/^\d{15}$/',
@@ -192,6 +217,7 @@ class AuthController extends Controller
                 'name' => 'United States',
                 'name_ar' => 'الولايات المتحدة',
                 'currency' => 'USD',
+                'cities' => ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Miami', 'Dallas', 'Seattle', 'San Francisco'],
                 'vat_rate' => 0.0,
                 'sales_tax' => true,
                 'tax_number_label' => 'EIN',
@@ -203,6 +229,7 @@ class AuthController extends Controller
                 'name' => 'Egypt',
                 'name_ar' => 'مصر',
                 'currency' => 'EGP',
+                'cities' => ['القاهرة', 'الجيزة', 'الإسكندرية', 'المنصورة', 'طنطا', 'أسيوط', 'الأقصر', 'أسوان'],
                 'vat_rate' => 14.0,
                 'tax_number_label' => 'الرقم الضريبي',
                 'fiscal_year_start' => '01-01',
@@ -212,6 +239,7 @@ class AuthController extends Controller
                 'name' => 'Jordan',
                 'name_ar' => 'الأردن',
                 'currency' => 'JOD',
+                'cities' => ['عمّان', 'إربد', 'الزرقاء', 'العقبة', 'السلط', 'مادبا', 'جرش', 'الكرك'],
                 'vat_rate' => 16.0,
                 'tax_number_label' => 'الرقم الضريبي',
                 'fiscal_year_start' => '01-01',

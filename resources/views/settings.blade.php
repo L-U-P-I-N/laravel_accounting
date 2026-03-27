@@ -2,11 +2,42 @@
 
 @section('title', 'الإعدادات')
 
+@php
+    $outputTaxSetting = $taxSettings->firstWhere('tax_type', 'output_vat') ?: $taxSettings->firstWhere('tax_type', 'vat');
+    $inputTaxSetting = $taxSettings->firstWhere('tax_type', 'input_vat');
+    $defaultVatRate = old('vat_rate', $outputTaxSetting?->rate ?? $inputTaxSetting?->rate ?? 15);
+    $selectedOutputTaxAccount = (int) old('output_tax_account_id', $outputTaxSetting?->account_id);
+    $selectedInputTaxAccount = (int) old('input_tax_account_id', $inputTaxSetting?->account_id);
+    $taxReportUrl = route('reports', ['report_type' => 'tax_summary']);
+    $taxReportPrintUrl = route('reports', ['report_type' => 'tax_summary', 'print' => 1]);
+@endphp
+
 @section('content')
 <div class="settings-shell">
+    @php
+        $selectedCountryCode = old('country_code', $company->country_code);
+        $selectedCountryConfig = $countries[$selectedCountryCode] ?? $companyCountry;
+        $selectedCountryCities = collect($selectedCountryConfig['cities'] ?? []);
+        $selectedCity = old('city', $company->city);
+    @endphp
+
     <div class="page-header">
         <h2 class="page-title"><i class="fas fa-cog"></i> الإعدادات</h2>
     </div>
+
+    @if (session('status'))
+        <div class="alert alert-success">{{ session('status') }}</div>
+    @endif
+
+    @if ($errors->any())
+        <div class="alert alert-danger">
+            <ul class="mb-0 ps-3">
+                @foreach ($errors->all() as $error)
+                    <li>{{ $error }}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
 
     <div class="row">
         <div class="col-md-3 mb-4 mb-md-0">
@@ -29,24 +60,39 @@
                     <div class="list-card">
                         <div class="card-header"><h5 class="mb-0">معلومات الشركة</h5></div>
                         <div class="card-body">
-                            <div class="row g-3">
-                                <div class="col-md-6"><label class="form-label">اسم الشركة</label><input type="text" class="form-control" value="{{ $company->name }}"></div>
-                                <div class="col-md-6"><label class="form-label">الرقم الضريبي</label><input type="text" class="form-control" value="{{ $company->tax_number }}"></div>
-                                <div class="col-md-6"><label class="form-label">البريد الإلكتروني</label><input type="email" class="form-control" value="{{ $company->email }}"></div>
-                                <div class="col-md-6"><label class="form-label">رقم الهاتف</label><input type="text" class="form-control" value="{{ $company->phone }}"></div>
-                                <div class="col-md-6"><label class="form-label">العنوان</label><input type="text" class="form-control" value="{{ $company->address }}"></div>
-                                <div class="col-md-6"><label class="form-label">المدينة</label><input type="text" class="form-control" value="{{ $company->city }}"></div>
-                                <div class="col-md-6">
-                                    <label class="form-label">الدولة</label>
-                                    <select class="form-select">
-                                        @foreach ($countries as $code => $config)
-                                            <option value="{{ $code }}" {{ $company->country_code === $code ? 'selected' : '' }}>{{ $config['name_ar'] }}</option>
-                                        @endforeach
-                                    </select>
+                            <form method="POST" action="{{ route('settings.company.update') }}" id="companySettingsForm">
+                                @csrf
+                                @method('PUT')
+                                <div class="row g-3">
+                                    <div class="col-md-6"><label class="form-label">اسم الشركة</label><input type="text" name="name" class="form-control" value="{{ old('name', $company->name) }}" required></div>
+                                    <div class="col-md-6"><label class="form-label">الرقم الضريبي</label><input type="text" name="tax_number" class="form-control" value="{{ old('tax_number', $company->tax_number) }}"></div>
+                                    <div class="col-md-6"><label class="form-label">البريد الإلكتروني</label><input type="email" name="email" class="form-control" value="{{ old('email', $company->email) }}"></div>
+                                    <div class="col-md-6"><label class="form-label">رقم الهاتف</label><input type="text" name="phone" class="form-control" value="{{ old('phone', $company->phone) }}"></div>
+                                    <div class="col-md-6"><label class="form-label">العنوان</label><input type="text" name="address" class="form-control" value="{{ old('address', $company->address) }}"></div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">الدولة</label>
+                                        <select class="form-select" name="country_code" data-country-select required>
+                                            @foreach ($countries as $code => $config)
+                                                <option value="{{ $code }}" data-currency="{{ $config['currency'] ?? '' }}" {{ $selectedCountryCode === $code ? 'selected' : '' }}>{{ $config['name_ar'] }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">المدينة</label>
+                                        <select class="form-select" name="city" data-city-select>
+                                            <option value="">اختر المدينة</option>
+                                            @foreach ($selectedCountryCities as $city)
+                                                <option value="{{ $city }}" {{ $selectedCity === $city ? 'selected' : '' }}>{{ $city }}</option>
+                                            @endforeach
+                                            @if ($selectedCity && ! $selectedCountryCities->contains($selectedCity))
+                                                <option value="{{ $selectedCity }}" selected>{{ $selectedCity }}</option>
+                                            @endif
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6"><label class="form-label">العملة</label><input type="text" name="currency" class="form-control" value="{{ old('currency', $selectedCountryConfig['currency'] ?? $company->currency) }}" data-currency-input readonly></div>
                                 </div>
-                                <div class="col-md-6"><label class="form-label">العملة</label><input type="text" class="form-control" value="{{ $company->currency }}"></div>
-                            </div>
-                            <div class="mt-3"><button type="button" class="btn btn-primary" disabled>حفظ التغييرات</button></div>
+                                <div class="mt-3"><button type="submit" class="btn btn-primary">حفظ التغييرات</button></div>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -72,28 +118,47 @@
                     <div class="list-card">
                         <div class="card-header"><h5 class="mb-0">إعدادات الضرائب</h5></div>
                         <div class="card-body">
-                            <div class="row g-3 mb-4">
-                                <div class="col-md-4"><label class="form-label">ضريبة القيمة المضافة (%)</label><input type="number" class="form-control" value="15"></div>
-                                <div class="col-md-4"><label class="form-label">حساب ضريبة المخرجات</label><select class="form-select">@foreach ($accounts->where('account_type', 'liability') as $account)<option>{{ $account->name }}</option>@endforeach</select></div>
-                                <div class="col-md-4"><label class="form-label">حساب ضريبة المدخلات</label><select class="form-select">@foreach ($accounts->where('account_type', 'asset') as $account)<option>{{ $account->name }}</option>@endforeach</select></div>
+                            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
+                                <div>
+                                    <p class="text-muted mb-0">اربط حساب ضريبة المخرجات وضريبة المدخلات المستخدمة في القيود الآلية والتقارير الضريبية.</p>
+                                </div>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <a href="{{ $taxReportUrl }}" target="_blank" class="btn btn-outline-primary">
+                                        <i class="fas fa-chart-pie ms-1"></i> إنشاء تقرير الضرائب
+                                    </a>
+                                    <a href="{{ $taxReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
+                                        <i class="fas fa-print ms-1"></i> طباعة / PDF
+                                    </a>
+                                </div>
                             </div>
+                            <form method="POST" action="{{ route('settings.taxes.update') }}">
+                                @csrf
+                                @method('PUT')
+                                <div class="row g-3 mb-4">
+                                    <div class="col-md-4"><label class="form-label">ضريبة القيمة المضافة (%)</label><input type="number" name="vat_rate" class="form-control" min="0" max="100" step="0.01" value="{{ $defaultVatRate }}" required></div>
+                                    <div class="col-md-4"><label class="form-label">حساب ضريبة المخرجات</label><select name="output_tax_account_id" class="form-select" required>@foreach ($accounts->where('account_type', 'liability') as $account)<option value="{{ $account->id }}" {{ $selectedOutputTaxAccount === (int) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name }}</option>@endforeach</select></div>
+                                    <div class="col-md-4"><label class="form-label">حساب ضريبة المدخلات</label><select name="input_tax_account_id" class="form-select" required>@foreach ($accounts->where('account_type', 'asset') as $account)<option value="{{ $account->id }}" {{ $selectedInputTaxAccount === (int) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name }}</option>@endforeach</select></div>
+                                </div>
+                                <div class="mt-3"><button type="submit" class="btn btn-primary">حفظ إعدادات الضرائب</button></div>
+                            </form>
                             <div class="table-responsive">
                                 <table class="table table-striped">
-                                    <thead><tr><th>الاسم</th><th>النسبة</th><th>افتراضي</th></tr></thead>
+                                    <thead><tr><th>الاسم</th><th>النوع</th><th>النسبة</th><th>الحساب المرتبط</th><th>افتراضي</th></tr></thead>
                                     <tbody>
                                         @forelse ($taxSettings as $taxSetting)
                                             <tr>
                                                 <td>{{ $taxSetting->name ?? 'إعداد ضريبي' }}</td>
+                                                <td>{{ $taxSetting->tax_type === 'input_vat' ? 'ضريبة مدخلات' : 'ضريبة مخرجات' }}</td>
                                                 <td>{{ $taxSetting->rate ?? $taxSetting->vat_rate ?? 0 }}%</td>
+                                                <td>{{ $taxSetting->account?->code ? $taxSetting->account->code . ' - ' . $taxSetting->account->name : 'غير مرتبط' }}</td>
                                                 <td><span class="badge bg-{{ ($taxSetting->is_default ?? false) ? 'success' : 'secondary' }}">{{ ($taxSetting->is_default ?? false) ? 'نعم' : 'لا' }}</span></td>
                                             </tr>
                                         @empty
-                                            <tr><td colspan="3" class="text-center">لا توجد إعدادات ضريبية محفوظة</td></tr>
+                                            <tr><td colspan="5" class="text-center">لا توجد إعدادات ضريبية محفوظة</td></tr>
                                         @endforelse
                                     </tbody>
                                 </table>
                             </div>
-                            <div class="mt-3"><button type="button" class="btn btn-primary" disabled>حفظ الإعدادات</button></div>
                         </div>
                     </div>
                 </div>
@@ -150,3 +215,39 @@
     </div>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+const companyCountryConfigs = @json($countries, JSON_UNESCAPED_UNICODE);
+const countrySelect = document.querySelector('[data-country-select]');
+const citySelect = document.querySelector('[data-city-select]');
+const currencyInput = document.querySelector('[data-currency-input]');
+
+function syncCompanyLocationFields() {
+    if (!countrySelect || !citySelect) {
+        return;
+    }
+
+    const selectedCountry = countrySelect.value;
+    const config = companyCountryConfigs[selectedCountry] || {};
+    const cities = Array.isArray(config.cities) ? config.cities : [];
+    const previousValue = citySelect.value;
+
+    citySelect.innerHTML = '<option value="">اختر المدينة</option>';
+
+    cities.forEach((city) => {
+        const option = document.createElement('option');
+        option.value = city;
+        option.textContent = city;
+        option.selected = previousValue === city;
+        citySelect.appendChild(option);
+    });
+
+    if (currencyInput) {
+        currencyInput.value = config.currency || '';
+    }
+}
+
+countrySelect?.addEventListener('change', syncCompanyLocationFields);
+</script>
+@endpush

@@ -3,11 +3,15 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\AccountingPageController;
+use App\Models\Account;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\Product;
+use App\Models\Purchase;
+use App\Models\Supplier;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -133,5 +137,122 @@ class ReportsPageTest extends TestCase
         $this->assertCount(1, $data['reportRows']);
         $this->assertSame('Laptop Pro', $data['reportRows']->first()['label']);
         $this->assertSame(1500.0, $data['reportRows']->first()['value']);
+    }
+
+    public function test_reports_page_builds_tax_summary_report(): void
+    {
+        $company = Company::create([
+            'name' => 'Tax Reports Co',
+            'country_code' => 'SA',
+            'currency' => 'SAR',
+        ]);
+
+        $user = User::factory()->create([
+            'first_name' => 'Owner',
+            'last_name' => 'Tax',
+            'name' => 'Owner Tax',
+            'role' => 'owner',
+            'company_id' => $company->id,
+            'must_change_password' => false,
+            'is_active' => true,
+        ]);
+
+        $customer = Customer::create([
+            'company_id' => $company->id,
+            'name' => 'Customer Tax',
+            'is_active' => true,
+        ]);
+
+        $supplier = Supplier::create([
+            'company_id' => $company->id,
+            'name' => 'Supplier Tax',
+            'is_active' => true,
+        ]);
+
+        $expenseAccount = Account::create([
+            'company_id' => $company->id,
+            'code' => '6100',
+            'name' => 'Office Expense',
+            'name_ar' => 'مصروف مكتبي',
+            'account_type' => 'expense',
+            'is_active' => true,
+            'is_system' => false,
+        ]);
+
+        $paymentAccount = Account::create([
+            'company_id' => $company->id,
+            'code' => '1105',
+            'name' => 'Cashbox',
+            'name_ar' => 'الصندوق',
+            'account_type' => 'asset',
+            'is_active' => true,
+            'is_system' => false,
+        ]);
+
+        Invoice::create([
+            'invoice_number' => 'INV-TAX-1',
+            'customer_id' => $customer->id,
+            'company_id' => $company->id,
+            'invoice_date' => '2026-03-20',
+            'subtotal' => 100,
+            'tax_amount' => 15,
+            'total' => 115,
+            'paid_amount' => 0,
+            'balance_due' => 115,
+            'status' => 'sent',
+            'payment_status' => 'pending',
+            'currency' => 'SAR',
+            'exchange_rate' => 1,
+        ]);
+
+        Purchase::create([
+            'purchase_number' => 'PO-TAX-1',
+            'supplier_id' => $supplier->id,
+            'company_id' => $company->id,
+            'purchase_date' => '2026-03-21',
+            'subtotal' => 80,
+            'tax_amount' => 12,
+            'total' => 92,
+            'paid_amount' => 0,
+            'balance_due' => 92,
+            'status' => 'approved',
+            'payment_status' => 'pending',
+        ]);
+
+        Expense::create([
+            'expense_number' => 'EXP-TAX-1',
+            'company_id' => $company->id,
+            'expense_account_id' => $expenseAccount->id,
+            'payment_account_id' => $paymentAccount->id,
+            'created_by' => $user->id,
+            'expense_date' => '2026-03-22',
+            'name' => 'Stationery',
+            'amount' => 20,
+            'tax_rate' => 15,
+            'tax_amount' => 3,
+            'total' => 23,
+            'status' => 'posted',
+        ]);
+
+        $this->actingAs($user);
+        view()->share('errors', new ViewErrorBag());
+
+        $request = Request::create('/reports', 'GET', [
+            'report_type' => 'tax_summary',
+            'period' => 'custom',
+            'date_from' => '2026-03-01',
+            'date_to' => '2026-03-31',
+        ]);
+        $request->setUserResolver(fn () => $user);
+
+        $view = app(AccountingPageController::class)->reports($request);
+        $data = $view->getData();
+
+        $this->assertSame('tax_summary', $data['selectedReportType']);
+        $this->assertSame('تقرير الضرائب', $data['report']['title']);
+        $this->assertCount(4, $data['reportRows']);
+        $this->assertSame(15.0, (float) $data['report']['highlights'][0]['value']);
+        $this->assertSame(15.0, (float) $data['report']['highlights'][1]['value']);
+        $this->assertSame(0.0, (float) $data['report']['highlights'][2]['value']);
     }
 }

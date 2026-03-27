@@ -137,6 +137,21 @@
                     </select>
                 </div>
 
+                <div class="mb-3">
+                    <label for="city" class="form-label"><i class="fas fa-map-marker-alt ms-2"></i> المدينة</label>
+                    @php
+                        $selectedCountry = old('country_code', 'SA');
+                        $selectedCities = $countries[$selectedCountry]['cities'] ?? [];
+                        $selectedCity = old('city');
+                    @endphp
+                    <select class="form-select" id="city" name="city" required>
+                        <option value="">اختر المدينة</option>
+                        @foreach ($selectedCities as $city)
+                            <option value="{{ $city }}" {{ $selectedCity === $city ? 'selected' : '' }}>{{ $city }}</option>
+                        @endforeach
+                    </select>
+                </div>
+
                 <div class="alert alert-info">
                     <i class="fas fa-info-circle ms-2"></i>
                     <strong>معلومات:</strong> سيتم إنشاء شجرة حسابات افتراضية وإعدادات ضريبية مناسبة لدولتك تلقائياً
@@ -166,5 +181,33 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const registerCountryConfigs = @json($countries, JSON_UNESCAPED_UNICODE);
+        const registerCountrySelect = document.getElementById('country_code');
+        const registerCitySelect = document.getElementById('city');
+
+        function syncRegisterCities() {
+            if (!registerCountrySelect || !registerCitySelect) {
+                return;
+            }
+
+            const selectedCountry = registerCountrySelect.value;
+            const config = registerCountryConfigs[selectedCountry] || {};
+            const cities = Array.isArray(config.cities) ? config.cities : [];
+            const previousValue = registerCitySelect.value;
+
+            registerCitySelect.innerHTML = '<option value="">اختر المدينة</option>';
+
+            cities.forEach((city) => {
+                const option = document.createElement('option');
+                option.value = city;
+                option.textContent = city;
+                option.selected = previousValue === city;
+                registerCitySelect.appendChild(option);
+            });
+        }
+
+        registerCountrySelect?.addEventListener('change', syncRegisterCities);
+    </script>
 </body>
 </html>

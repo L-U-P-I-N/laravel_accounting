@@ -221,6 +221,12 @@
     </style>
 </head>
 <body>
+    @php
+        $companyCountryLabel = $companyCountry['name_ar'] ?? ($company->country_code ?? 'غير محددة');
+        $companyCityLabel = $company->city ?: '-';
+        $customerCountryLabel = $invoice->customer?->country ?: 'غير محددة';
+        $customerCityLabel = $invoice->customer?->city ?: '-';
+    @endphp
     @if ($invoice->status === 'draft')
         <div class="watermark">مسودة</div>
     @endif
@@ -230,7 +236,8 @@
             <div class="company-info">
                 <h1>{{ $company->name }}</h1>
                 <p>{{ $company->address }}</p>
-                <p>{{ trim(($company->city ?? '') . ' ' . ($company->country_code ?? '')) }}</p>
+                <p>المدينة: {{ $companyCityLabel }}</p>
+                <p>الدولة: {{ $companyCountryLabel }}</p>
                 <p>الهاتف: {{ $company->phone }}</p>
                 <p>البريد: {{ $company->email }}</p>
                 @if ($company->tax_number)
@@ -264,7 +271,8 @@
                 <div class="section-title">معلومات الشركة</div>
                 <p><strong>{{ $company->name }}</strong></p>
                 <p>{{ $company->address }}</p>
-                <p>{{ trim(($company->city ?? '') . ' ' . ($company->country_code ?? '')) }}</p>
+                <p>المدينة: {{ $companyCityLabel }}</p>
+                <p>الدولة: {{ $companyCountryLabel }}</p>
                 <p>الهاتف: {{ $company->phone }}</p>
                 <p>البريد: {{ $company->email }}</p>
             </div>
@@ -275,8 +283,9 @@
                 @if ($invoice->customer?->address)
                     <p>{{ $invoice->customer->address }}</p>
                 @endif
-                @if ($invoice->customer?->city)
-                    <p>{{ trim(($invoice->customer->city ?? '') . ' ' . ($invoice->customer->country_code ?? '')) }}</p>
+                @if ($invoice->customer)
+                    <p>المدينة: {{ $customerCityLabel }}</p>
+                    <p>الدولة: {{ $customerCountryLabel }}</p>
                 @endif
                 @if ($invoice->customer?->phone)
                     <p>الهاتف: {{ $invoice->customer->phone }}</p>

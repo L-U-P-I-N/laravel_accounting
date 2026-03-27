@@ -11,26 +11,24 @@ class Customer extends Model
 
     protected $fillable = [
         'company_id',
+        'code',
         'name',
         'name_ar',
         'email',
         'phone',
+        'mobile',
         'address',
         'city',
-        'country_code',
+        'country',
         'tax_number',
-        'commercial_reg',
-        'contact_person',
-        'contact_phone',
-        'contact_email',
-        'payment_terms',
         'credit_limit',
-        'notes',
+        'balance',
         'is_active',
     ];
 
     protected $casts = [
         'credit_limit' => 'decimal:2',
+        'balance' => 'decimal:2',
         'is_active' => 'boolean',
     ];
 

@@ -163,11 +163,12 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
         abort_if((int) $invoice->company_id !== (int) $company->id, 404);
+        $companyCountry = $this->countryConfigForCompany($company);
 
         $invoice->load('customer');
         $items = $this->invoiceItems($invoice);
 
-        return view('invoice_pdf', compact('company', 'invoice', 'items'));
+        return view('invoice_pdf', compact('company', 'companyCountry', 'invoice', 'items'));
     }
 
     public function purchases(Request $request): View
@@ -199,6 +200,22 @@ class AccountingPageController extends Controller
             'supplierFilter' => $supplierFilter,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+        ]);
+    }
+
+    public function purchasePrint(Request $request, Purchase $purchase): View
+    {
+        $company = $this->company($request);
+        abort_if((int) $purchase->company_id !== (int) $company->id, 404);
+        $companyCountry = $this->countryConfigForCompany($company);
+
+        $purchase->load(['supplier', 'items.product']);
+
+        return view('purchase_print', [
+            'company' => $company,
+            'companyCountry' => $companyCountry,
+            'purchase' => $purchase,
+            'printMode' => $request->boolean('print', true),
         ]);
     }
 
@@ -309,8 +326,23 @@ class AccountingPageController extends Controller
     public function customers(Request $request): View
     {
         $company = $this->company($request);
+        $companyCountry = $this->countryConfigForCompany($company);
+        $companyCities = collect($companyCountry['cities'] ?? []);
 
-        $customers = Customer::where('company_id', $company->id)
+        $cityFilter = trim($request->string('city')->toString());
+        $statusFilter = $request->string('status')->toString();
+        $baseCustomersQuery = Customer::where('company_id', $company->id);
+        $customersQuery = (clone $baseCustomersQuery);
+
+        if ($cityFilter !== '') {
+            $customersQuery->where('city', $cityFilter);
+        }
+
+        if (in_array($statusFilter, ['active', 'inactive'], true)) {
+            $customersQuery->where('is_active', $statusFilter === 'active');
+        }
+
+        $customers = $customersQuery
             ->orderBy('name')
             ->get()
             ->map(function (Customer $customer) use ($company) {
@@ -322,12 +354,87 @@ class AccountingPageController extends Controller
                 return $customer;
             });
 
-        return view('customers', compact('company', 'customers'));
+        $reportCustomers = $baseCustomersQuery->orderBy('name')->get(['id', 'name']);
+        $customerFilters = [
+            'city' => $cityFilter,
+            'status' => $statusFilter,
+            'shown' => $customers->count(),
+            'total' => (clone $baseCustomersQuery)->count(),
+        ];
+
+        return view('customers', compact('company', 'customers', 'companyCountry', 'companyCities', 'reportCustomers', 'customerFilters'));
+    }
+
+    public function showCustomer(Request $request, Customer $customer): View
+    {
+        $company = $this->company($request);
+        abort_if((int) $customer->company_id !== (int) $company->id, 404);
+        $companyCountry = $this->countryConfigForCompany($company);
+
+        $customer->load([
+            'invoices' => fn ($query) => $query->orderByDesc('invoice_date'),
+        ]);
+
+        $customer->code = $customer->code ?: 'CUS-' . str_pad((string) $customer->id, 4, '0', STR_PAD_LEFT);
+        $customer->balance = (float) $customer->invoices->sum('balance_due');
+        $customer->invoices_total = (float) $customer->invoices->sum('total');
+
+        return view('customer_show', compact('company', 'customer', 'companyCountry'));
+    }
+
+    public function storeCustomer(Request $request): RedirectResponse
+    {
+        $company = $this->company($request);
+        $validated = $this->validateCustomerData($request, $company->id);
+
+        $customer = Customer::create($this->customerPayload($validated, $company));
+
+        if (! $customer->code) {
+            $customer->update([
+                'code' => 'CUS-' . str_pad((string) $customer->id, 4, '0', STR_PAD_LEFT),
+            ]);
+        }
+
+        return redirect()->route('customers')->with('status', 'تمت إضافة العميل بنجاح.');
+    }
+
+    public function updateCustomer(Request $request, Customer $customer): RedirectResponse
+    {
+        $company = $this->company($request);
+        abort_if((int) $customer->company_id !== (int) $company->id, 404);
+
+        $validated = $this->validateCustomerData($request, $company->id, $customer);
+
+        $customer->update($this->customerPayload($validated, $company, $customer));
+
+        if (! $customer->code) {
+            $customer->update([
+                'code' => 'CUS-' . str_pad((string) $customer->id, 4, '0', STR_PAD_LEFT),
+            ]);
+        }
+
+        return redirect()->route('customers')->with('status', 'تم تحديث العميل بنجاح.');
+    }
+
+    public function destroyCustomer(Request $request, Customer $customer): RedirectResponse
+    {
+        $company = $this->company($request);
+        abort_if((int) $customer->company_id !== (int) $company->id, 404);
+
+        if ($customer->invoices()->exists()) {
+            return redirect()->route('customers')->with('error', 'لا يمكن حذف عميل مرتبط بفواتير.');
+        }
+
+        $customer->delete();
+
+        return redirect()->route('customers')->with('status', 'تم حذف العميل بنجاح.');
     }
 
     public function suppliers(Request $request): View
     {
         $company = $this->company($request);
+        $companyCountry = $this->countryConfigForCompany($company);
+        $companyCities = collect($companyCountry['cities'] ?? []);
 
         $suppliers = Supplier::where('company_id', $company->id)
             ->with(['purchases' => function ($query) {
@@ -344,13 +451,14 @@ class AccountingPageController extends Controller
                 return $supplier;
             });
 
-        return view('suppliers', compact('company', 'suppliers'));
+        return view('suppliers', compact('company', 'suppliers', 'companyCountry', 'companyCities'));
     }
 
     public function showSupplier(Request $request, Supplier $supplier): View
     {
         $company = $this->company($request);
         abort_if((int) $supplier->company_id !== (int) $company->id, 404);
+        $companyCountry = $this->countryConfigForCompany($company);
 
         $supplier->load([
             'purchases' => fn ($query) => $query->orderByDesc('purchase_date'),
@@ -363,7 +471,7 @@ class AccountingPageController extends Controller
 
         $suggestedPaymentReference = $this->referenceGenerator->nextSupplierPaymentReference($company->id);
 
-        return view('supplier_show', compact('company', 'supplier', 'suggestedPaymentReference'));
+        return view('supplier_show', compact('company', 'supplier', 'suggestedPaymentReference', 'companyCountry'));
     }
 
     public function storeSupplier(Request $request): RedirectResponse
@@ -371,7 +479,7 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         $validated = $this->validateSupplierData($request, $company->id);
 
-        $supplier = Supplier::create($this->supplierPayload($validated, $company->id));
+        $supplier = Supplier::create($this->supplierPayload($validated, $company));
 
         if (! $supplier->code) {
             $supplier->update([
@@ -389,7 +497,7 @@ class AccountingPageController extends Controller
 
         $validated = $this->validateSupplierData($request, $company->id, $supplier);
 
-        $supplier->update($this->supplierPayload($validated, $company->id, $supplier));
+        $supplier->update($this->supplierPayload($validated, $company, $supplier));
 
         if (! $supplier->code) {
             $supplier->update([
@@ -944,6 +1052,11 @@ class AccountingPageController extends Controller
                 'description' => 'أرصدة الموردين المستحقة أو مورد محدد.',
                 'focus' => 'supplier',
             ],
+            'tax_summary' => [
+                'label' => 'تقرير الضرائب',
+                'description' => 'ملخص ضريبة المخرجات وضريبة المدخلات وصافي الالتزام الضريبي خلال الفترة.',
+                'focus' => null,
+            ],
         ];
 
         $periodOptions = [
@@ -1007,11 +1120,13 @@ class AccountingPageController extends Controller
         $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get(['id', 'name']);
 
         $stats = $this->reportSummaryStats($company->id, $dateFrom, $dateTo);
+        $companyCountry = $this->countryConfigForCompany($company);
         $report = $this->buildReportData($company, $selectedReportType, $validated, $dateFrom, $dateTo, $reportTypes);
         $reportRows = $report['rows'];
 
         $viewData = [
             'company' => $company,
+            'companyCountry' => $companyCountry,
             'stats' => $stats,
             'reportRows' => $reportRows,
             'report' => $report,
@@ -1057,8 +1172,82 @@ class AccountingPageController extends Controller
         $accounts = Account::where('company_id', $company->id)->orderBy('code')->get();
         $taxSettings = TaxSetting::where('company_id', $company->id)->orderByDesc('is_default')->get();
         $countries = $this->countryConfigs();
+        $companyCountry = $this->countryConfigForCompany($company);
+        $companyCities = collect($companyCountry['cities'] ?? []);
 
-        return view('settings', compact('company', 'accounts', 'taxSettings', 'countries'));
+        return view('settings', compact('company', 'accounts', 'taxSettings', 'countries', 'companyCountry', 'companyCities'));
+    }
+
+    public function updateCompanySettings(Request $request): RedirectResponse
+    {
+        $company = $this->company($request);
+        $validated = $this->validateCompanySettingsData($request);
+
+        $countryConfig = $this->countryConfigs()->get($validated['country_code'], $this->countryConfigs()->get('SA'));
+
+        $company->update([
+            'name' => $validated['name'],
+            'tax_number' => $validated['tax_number'] ?? null,
+            'email' => $validated['email'] ?? null,
+            'phone' => $validated['phone'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'city' => $validated['city'] ?? null,
+            'country_code' => $validated['country_code'],
+            'currency' => $validated['currency'] ?? ($countryConfig['currency'] ?? $company->currency),
+        ]);
+
+        return redirect()->route('settings')->with('status', 'تم تحديث معلومات الشركة بنجاح.');
+    }
+
+    public function updateTaxSettings(Request $request): RedirectResponse
+    {
+        $company = $this->company($request);
+        $validated = $this->validateTaxSettingsData($request, $company->id);
+
+        $outputSetting = TaxSetting::where('company_id', $company->id)
+            ->whereIn('tax_type', ['output_vat', 'vat'])
+            ->orderByDesc('is_default')
+            ->first();
+
+        if ($outputSetting) {
+            if ($outputSetting->tax_type === 'vat') {
+                $outputSetting->tax_type = 'output_vat';
+            }
+
+            $outputSetting->fill([
+                'tax_name' => 'VAT',
+                'tax_name_ar' => 'ضريبة المخرجات',
+                'rate' => $validated['vat_rate'],
+                'is_default' => true,
+                'account_id' => $validated['output_tax_account_id'],
+            ])->save();
+        } else {
+            TaxSetting::create([
+                'company_id' => $company->id,
+                'tax_name' => 'VAT',
+                'tax_name_ar' => 'ضريبة المخرجات',
+                'tax_type' => 'output_vat',
+                'rate' => $validated['vat_rate'],
+                'is_default' => true,
+                'account_id' => $validated['output_tax_account_id'],
+            ]);
+        }
+
+        TaxSetting::updateOrCreate(
+            [
+                'company_id' => $company->id,
+                'tax_type' => 'input_vat',
+            ],
+            [
+                'tax_name' => 'Input VAT',
+                'tax_name_ar' => 'ضريبة المدخلات',
+                'rate' => $validated['vat_rate'],
+                'is_default' => false,
+                'account_id' => $validated['input_tax_account_id'],
+            ],
+        );
+
+        return redirect()->route('settings', ['#tax-settings'])->with('status', 'تم تحديث ربط الحسابات الضريبية بنجاح.');
     }
 
     private function resolveReportRange(string $period, ?string $dateFrom, ?string $dateTo): array
@@ -1127,6 +1316,7 @@ class AccountingPageController extends Controller
             'expense_details' => $this->expenseDetailsReport($company, $filters, $dateFrom, $dateTo),
             'receivables' => $this->receivablesReport($company, $filters, $dateFrom, $dateTo),
             'payables' => $this->payablesReport($company, $filters, $dateFrom, $dateTo),
+            'tax_summary' => $this->taxSummaryReport($company, $dateFrom, $dateTo),
             default => $this->incomeStatementReport($company, $dateFrom, $dateTo),
         };
 
@@ -1334,14 +1524,28 @@ class AccountingPageController extends Controller
             ->where('purchases.balance_due', '>', 0)
             ->when($selectedSupplierId, fn ($query) => $query->where('suppliers.id', $selectedSupplierId))
             ->groupBy('suppliers.id', 'suppliers.name')
-            ->selectRaw('suppliers.name as label, SUM(purchases.balance_due) as balance_due, COUNT(purchases.id) as purchase_count')
+            ->selectRaw('suppliers.name as label, SUM(purchases.subtotal) as subtotal_amount, SUM(purchases.tax_amount) as tax_amount, SUM(purchases.total) as total_amount, SUM(purchases.balance_due) as balance_due, COUNT(purchases.id) as purchase_count')
             ->orderByDesc('balance_due')
             ->get()
             ->map(fn ($row) => [
                 'label' => $row->label,
                 'value' => (float) $row->balance_due,
-                'meta' => 'عدد المشتريات المفتوحة: ' . $row->purchase_count,
+                'meta' => sprintf(
+                    'عدد المشتريات المفتوحة: %s | قبل الضريبة: %s | الضريبة: %s | الإجمالي: %s',
+                    $row->purchase_count,
+                    number_format((float) $row->subtotal_amount, 2),
+                    number_format((float) $row->tax_amount, 2),
+                    number_format((float) $row->total_amount, 2),
+                ),
             ]);
+
+        $purchaseTotals = Purchase::query()
+            ->where('company_id', $company->id)
+            ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->where('balance_due', '>', 0)
+            ->when($selectedSupplierId, fn ($query) => $query->where('supplier_id', $selectedSupplierId))
+            ->selectRaw('COUNT(id) as purchase_count, SUM(subtotal) as subtotal_amount, SUM(tax_amount) as tax_amount, SUM(total) as total_amount, SUM(balance_due) as balance_due')
+            ->first();
 
         return [
             'title' => $selectedSupplierId ? 'ذمم مورد محدد' : 'الذمم الدائنة',
@@ -1353,9 +1557,54 @@ class AccountingPageController extends Controller
             ],
             'highlights' => [
                 ['label' => 'عدد الموردين', 'value' => $rows->count()],
-                ['label' => 'إجمالي الذمم', 'value' => $rows->sum('value')],
+                ['label' => 'إجمالي قبل الضريبة', 'value' => (float) ($purchaseTotals->subtotal_amount ?? 0)],
+                ['label' => 'إجمالي الضريبة', 'value' => (float) ($purchaseTotals->tax_amount ?? 0)],
+                ['label' => 'إجمالي الذمم', 'value' => (float) ($purchaseTotals->balance_due ?? 0)],
             ],
             'empty_message' => 'لا توجد ذمم دائنة ضمن المعايير المختارة.',
+        ];
+    }
+
+    private function taxSummaryReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $outputVat = (float) Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('tax_amount');
+
+        $purchaseInputVat = (float) Purchase::where('company_id', $company->id)
+            ->whereIn('status', ['approved', 'partial', 'paid'])
+            ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('tax_amount');
+
+        $expenseInputVat = (float) Expense::where('company_id', $company->id)
+            ->whereBetween('expense_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('tax_amount');
+
+        $totalInputVat = $purchaseInputVat + $expenseInputVat;
+        $netVat = $outputVat - $totalInputVat;
+
+        $rows = collect([
+            ['label' => 'ضريبة المخرجات من الفواتير', 'value' => $outputVat, 'meta' => 'إجمالي ضريبة المبيعات المعتمدة خلال الفترة'],
+            ['label' => 'ضريبة المدخلات من المشتريات', 'value' => $purchaseInputVat, 'meta' => 'إجمالي ضريبة طلبات الشراء المعتمدة خلال الفترة'],
+            ['label' => 'ضريبة المدخلات من المصروفات', 'value' => $expenseInputVat, 'meta' => 'إجمالي ضريبة المصروفات خلال الفترة'],
+            ['label' => 'صافي الضريبة المستحقة', 'value' => $netVat, 'meta' => 'ضريبة المخرجات - إجمالي ضريبة المدخلات'],
+        ]);
+
+        return [
+            'title' => 'تقرير الضرائب',
+            'rows' => $rows,
+            'chart' => [
+                'type' => 'bar',
+                'labels' => $rows->pluck('label')->values(),
+                'values' => $rows->pluck('value')->map(fn ($value) => round((float) $value, 2))->values(),
+            ],
+            'highlights' => [
+                ['label' => 'ضريبة المخرجات', 'value' => $outputVat],
+                ['label' => 'ضريبة المدخلات', 'value' => $totalInputVat],
+                ['label' => 'صافي الضريبة', 'value' => $netVat],
+            ],
+            'empty_message' => 'لا توجد بيانات ضريبية للفترة المختارة.',
         ];
     }
 
@@ -1463,6 +1712,14 @@ class AccountingPageController extends Controller
             $uniqueEmailRule = $uniqueEmailRule->ignore($supplier->id);
         }
 
+        $cityRule = ['nullable', 'string', 'max:100'];
+        $companyCountryCode = Company::query()->whereKey($companyId)->value('country_code');
+        $availableCities = $this->cityOptionsForCountryCode($companyCountryCode);
+
+        if ($availableCities !== []) {
+            $cityRule = ['nullable', Rule::in($availableCities)];
+        }
+
         return $request->validate([
             'supplier_modal' => ['nullable', 'string'],
             'name' => ['required', 'string', 'max:200'],
@@ -1472,12 +1729,89 @@ class AccountingPageController extends Controller
             'phone' => ['nullable', 'string', 'max:20'],
             'mobile' => ['nullable', 'string', 'max:20'],
             'address' => ['nullable', 'string'],
-            'city' => ['nullable', 'string', 'max:100'],
-            'country' => ['nullable', 'string', 'max:100'],
+            'city' => $cityRule,
             'tax_number' => ['nullable', 'string', 'max:50'],
             'credit_limit' => ['nullable', 'numeric', 'min:0'],
             'is_active' => ['required', 'boolean'],
             'redirect_to' => ['nullable', 'string'],
+        ]);
+    }
+
+    private function validateCustomerData(Request $request, int $companyId, ?Customer $customer = null): array
+    {
+        $uniqueCodeRule = Rule::unique('customers', 'code')
+            ->where(fn ($query) => $query->where('company_id', $companyId));
+
+        $uniqueEmailRule = Rule::unique('customers', 'email')
+            ->where(fn ($query) => $query->where('company_id', $companyId));
+
+        if ($customer) {
+            $uniqueCodeRule = $uniqueCodeRule->ignore($customer->id);
+            $uniqueEmailRule = $uniqueEmailRule->ignore($customer->id);
+        }
+
+        $cityRule = ['nullable', 'string', 'max:100'];
+        $companyCountryCode = Company::query()->whereKey($companyId)->value('country_code');
+        $availableCities = $this->cityOptionsForCountryCode($companyCountryCode);
+
+        if ($availableCities !== []) {
+            $cityRule = ['nullable', Rule::in($availableCities)];
+        }
+
+        return $request->validate([
+            'customer_modal' => ['nullable', 'string'],
+            'name' => ['required', 'string', 'max:200'],
+            'name_ar' => ['nullable', 'string', 'max:200'],
+            'code' => ['nullable', 'string', 'max:20', $uniqueCodeRule],
+            'email' => ['nullable', 'email', 'max:120', $uniqueEmailRule],
+            'phone' => ['nullable', 'string', 'max:20'],
+            'mobile' => ['nullable', 'string', 'max:20'],
+            'address' => ['nullable', 'string'],
+            'city' => $cityRule,
+            'tax_number' => ['nullable', 'string', 'max:50'],
+            'credit_limit' => ['nullable', 'numeric', 'min:0'],
+            'is_active' => ['required', 'boolean'],
+        ]);
+    }
+
+    private function validateCompanySettingsData(Request $request): array
+    {
+        $countries = $this->countryConfigs();
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:200'],
+            'tax_number' => ['nullable', 'string', 'max:50'],
+            'email' => ['nullable', 'email', 'max:120'],
+            'phone' => ['nullable', 'string', 'max:20'],
+            'address' => ['nullable', 'string', 'max:255'],
+            'country_code' => ['required', Rule::in($countries->keys()->all())],
+            'city' => ['nullable', 'string', 'max:100'],
+            'currency' => ['nullable', 'string', 'max:10'],
+        ]);
+
+        $allowedCities = $this->cityOptionsForCountryCode($validated['country_code']);
+
+        if ($allowedCities !== [] && ! empty($validated['city']) && ! in_array($validated['city'], $allowedCities, true)) {
+            throw ValidationException::withMessages([
+                'city' => 'المدينة المحددة لا تتبع الدولة المختارة للشركة.',
+            ]);
+        }
+
+        return $validated;
+    }
+
+    private function validateTaxSettingsData(Request $request, int $companyId): array
+    {
+        return $request->validate([
+            'vat_rate' => ['required', 'numeric', 'min:0', 'max:100'],
+            'output_tax_account_id' => [
+                'required',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)->where('account_type', 'liability')),
+            ],
+            'input_tax_account_id' => [
+                'required',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)->where('account_type', 'asset')),
+            ],
         ]);
     }
 
@@ -1643,10 +1977,10 @@ class AccountingPageController extends Controller
             ->value('id');
     }
 
-    private function supplierPayload(array $validated, int $companyId, ?Supplier $supplier = null): array
+    private function supplierPayload(array $validated, Company $company, ?Supplier $supplier = null): array
     {
         return [
-            'company_id' => $companyId,
+            'company_id' => $company->id,
             'code' => $validated['code'] ?? null,
             'name' => $validated['name'],
             'name_ar' => $validated['name_ar'] ?? null,
@@ -1655,10 +1989,30 @@ class AccountingPageController extends Controller
             'mobile' => $validated['mobile'] ?? null,
             'address' => $validated['address'] ?? null,
             'city' => $validated['city'] ?? null,
-            'country' => $validated['country'] ?? null,
+            'country' => $this->countryLabel($company->country_code),
             'tax_number' => $validated['tax_number'] ?? null,
             'credit_limit' => $validated['credit_limit'] ?? 0,
             'balance' => $supplier?->balance ?? 0,
+            'is_active' => (bool) $validated['is_active'],
+        ];
+    }
+
+    private function customerPayload(array $validated, Company $company, ?Customer $customer = null): array
+    {
+        return [
+            'company_id' => $company->id,
+            'code' => $validated['code'] ?? null,
+            'name' => $validated['name'],
+            'name_ar' => $validated['name_ar'] ?? null,
+            'email' => $validated['email'] ?? null,
+            'phone' => $validated['phone'] ?? null,
+            'mobile' => $validated['mobile'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'city' => $validated['city'] ?? null,
+            'country' => $this->countryLabel($company->country_code),
+            'tax_number' => $validated['tax_number'] ?? null,
+            'credit_limit' => $validated['credit_limit'] ?? 0,
+            'balance' => $customer?->balance ?? 0,
             'is_active' => (bool) $validated['is_active'],
         ];
     }
@@ -1932,11 +2286,32 @@ class AccountingPageController extends Controller
     private function countryConfigs(): Collection
     {
         return collect([
-            'SA' => ['name_ar' => 'المملكة العربية السعودية', 'currency' => 'SAR'],
-            'AE' => ['name_ar' => 'الإمارات العربية المتحدة', 'currency' => 'AED'],
-            'US' => ['name_ar' => 'الولايات المتحدة', 'currency' => 'USD'],
-            'EG' => ['name_ar' => 'مصر', 'currency' => 'EGP'],
-            'JO' => ['name_ar' => 'الأردن', 'currency' => 'JOD'],
+            'SA' => ['name_ar' => 'المملكة العربية السعودية', 'currency' => 'SAR', 'cities' => ['الرياض', 'جدة', 'مكة المكرمة', 'المدينة المنورة', 'الدمام', 'الخبر', 'الظهران', 'الطائف', 'أبها', 'تبوك']],
+            'AE' => ['name_ar' => 'الإمارات العربية المتحدة', 'currency' => 'AED', 'cities' => ['دبي', 'أبوظبي', 'الشارقة', 'عجمان', 'رأس الخيمة', 'الفجيرة', 'أم القيوين', 'العين']],
+            'US' => ['name_ar' => 'الولايات المتحدة', 'currency' => 'USD', 'cities' => ['New York', 'Los Angeles', 'Chicago', 'Houston', 'Miami', 'Dallas', 'Seattle', 'San Francisco']],
+            'EG' => ['name_ar' => 'مصر', 'currency' => 'EGP', 'cities' => ['القاهرة', 'الجيزة', 'الإسكندرية', 'المنصورة', 'طنطا', 'أسيوط', 'الأقصر', 'أسوان']],
+            'JO' => ['name_ar' => 'الأردن', 'currency' => 'JOD', 'cities' => ['عمّان', 'إربد', 'الزرقاء', 'العقبة', 'السلط', 'مادبا', 'جرش', 'الكرك']],
         ]);
+    }
+
+    private function countryConfigForCompany(Company $company): array
+    {
+        $countries = $this->countryConfigs();
+
+        return $countries->get($company->country_code, $countries->get('SA'));
+    }
+
+    private function cityOptionsForCountryCode(?string $countryCode): array
+    {
+        $config = $this->countryConfigs()->get((string) $countryCode);
+
+        return array_values($config['cities'] ?? []);
+    }
+
+    private function countryLabel(?string $countryCode): string
+    {
+        $config = $this->countryConfigs()->get((string) $countryCode);
+
+        return $config['name_ar'] ?? ((string) $countryCode ?: 'غير محدد');
     }
 }

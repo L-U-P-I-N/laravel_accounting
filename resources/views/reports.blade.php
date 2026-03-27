@@ -229,6 +229,9 @@
                         @if (($reportTypes[$selectedReportType]['focus'] ?? null) === 'supplier' && $selectedSupplierId)
                             <span class="report-chip"><i class="fas fa-truck"></i>{{ optional($suppliers->firstWhere('id', $selectedSupplierId))->name }}</span>
                         @endif
+                        @if ($selectedReportType === 'tax_summary')
+                            <span class="report-chip"><i class="fas fa-percent"></i>ملخص الضريبة</span>
+                        @endif
                     </div>
                 </div>
 

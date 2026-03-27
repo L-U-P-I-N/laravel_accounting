@@ -4,6 +4,8 @@
 
 @php
     $canManageInvoices = auth()->user()->hasPermission('manage_invoices');
+    $customerCountryLabel = $invoice->customer?->country ?: 'غير محددة';
+    $customerCityLabel = $invoice->customer?->city ?: '-';
 @endphp
 
 @push('styles')
@@ -102,8 +104,9 @@
             @if ($invoice->customer?->address)
                 {{ $invoice->customer->address }}<br>
             @endif
-            @if ($invoice->customer?->city)
-                {{ $invoice->customer->city }}<br>
+            @if ($invoice->customer)
+                <div>المدينة: {{ $customerCityLabel }}</div>
+                <div>الدولة: {{ $customerCountryLabel }}</div>
             @endif
             @if ($invoice->customer?->phone)
                 {{ $invoice->customer->phone }}<br>

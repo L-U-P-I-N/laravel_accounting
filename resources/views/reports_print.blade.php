@@ -14,7 +14,7 @@
         .muted { color: #64748b; font-size: 14px; line-height: 1.8; }
         .chips { margin: 16px 0 0; }
         .chip { display: inline-block; padding: 8px 12px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; margin-left: 8px; margin-bottom: 8px; font-size: 13px; }
-        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
         .stat { border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; }
         .stat-label { color: #64748b; font-size: 14px; margin-bottom: 8px; }
         .stat-value { font-size: 24px; font-weight: 800; }
@@ -29,12 +29,17 @@
     </style>
 </head>
 <body>
+    @php
+        $companyCountryLabel = $companyCountry['name_ar'] ?? ($company->country_code ?? 'غير محددة');
+        $companyCityLabel = $company->city ?: '-';
+    @endphp
     <div class="sheet">
         <div class="header">
             <div>
                 <h1 class="title">{{ $report['title'] }}</h1>
                 <div class="muted">{{ $company->name }}</div>
                 <div class="muted">{{ $report['description'] }}</div>
+                <div class="muted">المدينة: {{ $companyCityLabel }} / الدولة: {{ $companyCountryLabel }}</div>
                 <div class="chips">
                     <span class="chip">{{ $report['date_range_label'] }}</span>
                     <span class="chip">{{ $reportTypes[$selectedReportType]['label'] }}</span>

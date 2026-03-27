@@ -3,11 +3,13 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\AccountingPageController;
+use App\Models\Account;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\JournalEntry;
 use App\Models\Product;
+use App\Models\TaxSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -97,6 +99,57 @@ class InvoiceCrudTest extends TestCase
             'source_id' => $invoice->id,
             'company_id' => $company->id,
         ]);
+    }
+
+    public function test_send_invoice_uses_configured_output_tax_account(): void
+    {
+        [$company, $user, $customer, $product] = $this->invoiceContext('send-output-tax@example.com');
+
+        $customOutputVatAccount = Account::create([
+            'company_id' => $company->id,
+            'code' => '2399',
+            'name' => 'Custom Output VAT',
+            'name_ar' => 'ضريبة مخرجات مخصصة',
+            'account_type' => 'liability',
+            'is_active' => true,
+            'is_system' => false,
+        ]);
+
+        TaxSetting::create([
+            'company_id' => $company->id,
+            'tax_name' => 'VAT',
+            'tax_name_ar' => 'ضريبة المخرجات',
+            'tax_type' => 'output_vat',
+            'rate' => 15,
+            'is_default' => true,
+            'account_id' => $customOutputVatAccount->id,
+        ]);
+
+        $storeRequest = Request::create('/invoices', 'POST', [
+            'customer_id' => $customer->id,
+            'invoice_date' => '2026-03-27',
+            'due_date' => '2026-04-27',
+            'status' => 'draft',
+            'item_product_id' => [$product->id],
+            'item_description' => ['Paid product'],
+            'item_quantity' => [2],
+            'item_price' => [25],
+            'item_tax_rate' => [15],
+        ]);
+        $storeRequest->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->storeInvoice($storeRequest);
+
+        $invoice = Invoice::firstOrFail();
+
+        $sendRequest = Request::create('/invoices/' . $invoice->id . '/send', 'PATCH');
+        $sendRequest->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->sendInvoice($sendRequest, $invoice);
+
+        $entry = JournalEntry::with('lines')->where('source_type', Invoice::class)->where('source_id', $invoice->id)->firstOrFail();
+
+        $this->assertTrue($entry->lines->contains(fn ($line) => (int) $line->account_id === (int) $customOutputVatAccount->id && (float) $line->credit === 7.5));
     }
 
     private function invoiceContext(string $email): array

@@ -12,6 +12,7 @@
     @stack('styles')
 </head>
 <body>
+    @php($currentUser = request()->user())
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <i class="fas fa-chart-line"></i>
@@ -23,43 +24,43 @@
                 <i class="fas fa-tachometer-alt"></i>
                 <span>لوحة التحكم</span>
             </a>
-            @if (auth()->user()->hasPermission('manage_users'))
+            @if ($currentUser?->hasPermission('manage_users'))
                 <a href="{{ route('users.index') }}" class="nav-link {{ request()->routeIs('users.*') ? 'active' : '' }}">
                     <i class="fas fa-user-shield"></i>
                     <span>إدارة المستخدمين</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_invoices'))
+            @if ($currentUser?->hasPermission('manage_invoices'))
                 <a href="{{ route('invoices') }}" class="nav-link {{ request()->routeIs('invoices*') ? 'active' : '' }}">
                     <i class="fas fa-file-invoice"></i>
                     <span>الفواتير</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_purchases'))
+            @if ($currentUser?->hasPermission('manage_purchases'))
                 <a href="{{ route('purchases') }}" class="nav-link {{ request()->routeIs('purchases') ? 'active' : '' }}">
                     <i class="fas fa-shopping-cart"></i>
                     <span>المشتريات</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_customers'))
+            @if ($currentUser?->hasPermission('manage_customers'))
                 <a href="{{ route('customers') }}" class="nav-link {{ request()->routeIs('customers') ? 'active' : '' }}">
                     <i class="fas fa-users"></i>
                     <span>العملاء</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_suppliers'))
+            @if ($currentUser?->hasPermission('manage_suppliers'))
                 <a href="{{ route('suppliers') }}" class="nav-link {{ request()->routeIs('suppliers') ? 'active' : '' }}">
                     <i class="fas fa-truck"></i>
                     <span>الموردين</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_products'))
+            @if ($currentUser?->hasPermission('manage_products'))
                 <a href="{{ route('products') }}" class="nav-link {{ request()->routeIs('products') ? 'active' : '' }}">
                     <i class="fas fa-box"></i>
                     <span>المنتجات</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_accounts'))
+            @if ($currentUser?->hasPermission('manage_accounts'))
                 <a href="{{ route('chart_of_accounts') }}" class="nav-link {{ request()->routeIs('chart_of_accounts') ? 'active' : '' }}">
                     <i class="fas fa-sitemap"></i>
                     <span>شجرة الحسابات</span>
@@ -69,25 +70,25 @@
                     <span>المصروفات</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_journal_entries'))
+            @if ($currentUser?->hasPermission('manage_journal_entries'))
                 <a href="{{ route('journal_entries') }}" class="nav-link {{ request()->routeIs('journal_entries*') ? 'active' : '' }}">
                     <i class="fas fa-book"></i>
                     <span>القيود المحاسبية</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('view_reports'))
+            @if ($currentUser?->hasPermission('view_reports'))
                 <a href="{{ route('reports') }}" class="nav-link {{ request()->routeIs('reports') ? 'active' : '' }}">
                     <i class="fas fa-chart-bar"></i>
                     <span>التقارير</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_employees'))
+            @if ($currentUser?->hasPermission('manage_employees'))
                 <a href="{{ route('hr') }}" class="nav-link {{ request()->routeIs('hr') ? 'active' : '' }}">
                     <i class="fas fa-user-tie"></i>
                     <span>الموارد البشرية</span>
                 </a>
             @endif
-            @if (auth()->user()->hasPermission('manage_settings'))
+            @if ($currentUser?->hasPermission('manage_settings'))
                 <a href="{{ route('settings') }}" class="nav-link {{ request()->routeIs('settings') ? 'active' : '' }}">
                     <i class="fas fa-cog"></i>
                     <span>الإعدادات</span>
@@ -108,20 +109,20 @@
                 <div class="dropdown">
                     <button class="btn btn-link dropdown-toggle" data-bs-toggle="dropdown">
                         <i class="fas fa-user-circle"></i>
-                        {{ auth()->user()->full_name }}
+                        {{ $currentUser?->full_name }}
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li>
-                            <span class="dropdown-item-text text-muted small">{{ auth()->user()->role_label }}</span>
+                            <span class="dropdown-item-text text-muted small">{{ $currentUser?->role_label }}</span>
                         </li>
-                        @if (auth()->user()->hasPermission('manage_users'))
+                        @if ($currentUser?->hasPermission('manage_users'))
                             <li>
                                 <a class="dropdown-item" href="{{ route('users.index') }}">
                                     <i class="fas fa-user-shield me-2"></i>إدارة المستخدمين
                                 </a>
                             </li>
                         @endif
-                        @if (auth()->user()->hasPermission('manage_settings'))
+                        @if ($currentUser?->hasPermission('manage_settings'))
                             <li>
                                 <a class="dropdown-item" href="{{ route('settings') }}">
                                     <i class="fas fa-cog me-2"></i>الإعدادات

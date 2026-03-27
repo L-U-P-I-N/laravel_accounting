@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\JournalEntry;
 use App\Models\Purchase;
 use App\Models\Supplier;
+use App\Models\TaxSetting;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
@@ -441,12 +442,40 @@ class AccountingService
 
     private function inputVatAccount(int $companyId): Account
     {
+        $configuredAccount = $this->configuredTaxAccount($companyId, ['input_vat', 'vat_input']);
+
+        if ($configuredAccount) {
+            return $configuredAccount;
+        }
+
         return $this->resolveConceptAccount($companyId, '2310', 'ضريبة المدخلات', 'asset', '1000', ['ضريبة المدخلات', 'Input VAT']);
     }
 
     private function outputVatAccount(int $companyId): Account
     {
+        $configuredAccount = $this->configuredTaxAccount($companyId, ['output_vat', 'vat']);
+
+        if ($configuredAccount) {
+            return $configuredAccount;
+        }
+
         return $this->resolveConceptAccount($companyId, '2300', 'ضريبة القيمة المضافة المستحقة', 'liability', '2000', ['ضريبة القيمة المضافة المستحقة', 'VAT Payable']);
+    }
+
+    private function configuredTaxAccount(int $companyId, array $taxTypes): ?Account
+    {
+        $setting = TaxSetting::with('account')
+            ->where('company_id', $companyId)
+            ->whereIn('tax_type', $taxTypes)
+            ->whereNotNull('account_id')
+            ->orderByDesc('is_default')
+            ->first();
+
+        if (! $setting?->account) {
+            return null;
+        }
+
+        return $setting->account;
     }
 
     private function salesRevenueAccount(int $companyId): Account

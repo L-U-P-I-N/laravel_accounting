@@ -7,6 +7,7 @@
     $canViewReports = auth()->user()->hasPermission('view_reports');
     $suppliersReportUrl = route('reports', ['report_type' => 'payables']);
     $suppliersReportPrintUrl = route('reports', ['report_type' => 'payables', 'print' => 1]);
+    $companyCountryLabel = $companyCountry['name_ar'] ?? ($company->country_code ?? 'غير محدد');
 @endphp
 
 @section('content')
@@ -112,6 +113,8 @@
         @php
             $editSupplierModalKey = 'edit-' . $supplier->id;
             $editSupplierModalHasErrors = $errors->any() && $activeSupplierModal === $editSupplierModalKey;
+            $supplierCountryLabel = $supplier->country ?: $companyCountryLabel;
+            $supplierLocationLabel = 'المدينة: ' . ($supplier->city ?: '-') . ' / الدولة: ' . $supplierCountryLabel;
         @endphp
         <div class="list-card supplier-card">
             <div class="row align-items-center">
@@ -125,6 +128,7 @@
                 <div class="col-md-3 mb-3 mb-md-0">
                     <div class="mb-1"><i class="fas fa-envelope ms-2 text-muted"></i>{{ $supplier->email ?: 'لا يوجد بريد' }}</div>
                     <div><i class="fas fa-phone ms-2 text-muted"></i>{{ $supplier->phone ?: 'لا يوجد هاتف' }}</div>
+                    <div class="mt-1"><i class="fas fa-map-marker-alt ms-2 text-muted"></i>{{ $supplierLocationLabel }}</div>
                 </div>
                 <div class="col-md-3 mb-3 mb-md-0">
                     <div class="mb-1">
@@ -189,8 +193,23 @@
                                     <div class="col-md-6"><label class="form-label">البريد الإلكتروني</label><input type="email" name="email" class="form-control" value="{{ $editSupplierModalHasErrors ? old('email') : $supplier->email }}"></div>
                                     <div class="col-md-6"><label class="form-label">الهاتف</label><input type="text" name="phone" class="form-control" value="{{ $editSupplierModalHasErrors ? old('phone') : $supplier->phone }}"></div>
                                     <div class="col-md-6"><label class="form-label">الجوال</label><input type="text" name="mobile" class="form-control" value="{{ $editSupplierModalHasErrors ? old('mobile') : $supplier->mobile }}"></div>
-                                    <div class="col-md-6"><label class="form-label">المدينة</label><input type="text" name="city" class="form-control" value="{{ $editSupplierModalHasErrors ? old('city') : $supplier->city }}"></div>
-                                    <div class="col-md-6"><label class="form-label">الدولة</label><input type="text" name="country" class="form-control" value="{{ $editSupplierModalHasErrors ? old('country') : $supplier->country }}"></div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">المدينة</label>
+                                        @php
+                                            $selectedCity = $editSupplierModalHasErrors ? old('city') : $supplier->city;
+                                        @endphp
+                                        <select name="city" class="form-select">
+                                            <option value="">اختر المدينة</option>
+                                            @foreach ($companyCities as $city)
+                                                <option value="{{ $city }}" {{ $selectedCity === $city ? 'selected' : '' }}>{{ $city }}</option>
+                                            @endforeach
+                                            @if ($selectedCity && ! $companyCities->contains($selectedCity))
+                                                <option value="{{ $selectedCity }}" selected>{{ $selectedCity }}</option>
+                                            @endif
+                                        </select>
+                                        <div class="form-text">الدولة المعتمدة: {{ $companyCountryLabel }}</div>
+                                    </div>
+                                    <div class="col-md-6"><label class="form-label">الدولة</label><input type="text" class="form-control" value="{{ $companyCountryLabel }}" readonly></div>
                                     <div class="col-md-6"><label class="form-label">الرقم الضريبي</label><input type="text" name="tax_number" class="form-control" value="{{ $editSupplierModalHasErrors ? old('tax_number') : $supplier->tax_number }}"></div>
                                     <div class="col-md-6"><label class="form-label">الحد الائتماني</label><input type="number" name="credit_limit" class="form-control" min="0" step="0.01" value="{{ $editSupplierModalHasErrors ? old('credit_limit') : $supplier->credit_limit }}"></div>
                                     <div class="col-12"><label class="form-label">العنوان</label><textarea name="address" class="form-control" rows="3">{{ $editSupplierModalHasErrors ? old('address') : $supplier->address }}</textarea></div>
@@ -248,8 +267,17 @@
                             <div class="col-md-6"><label class="form-label">البريد الإلكتروني</label><input type="email" name="email" class="form-control" value="{{ old('email') }}"></div>
                             <div class="col-md-6"><label class="form-label">الهاتف</label><input type="text" name="phone" class="form-control" value="{{ old('phone') }}"></div>
                             <div class="col-md-6"><label class="form-label">الجوال</label><input type="text" name="mobile" class="form-control" value="{{ old('mobile') }}"></div>
-                            <div class="col-md-6"><label class="form-label">المدينة</label><input type="text" name="city" class="form-control" value="{{ old('city') }}"></div>
-                            <div class="col-md-6"><label class="form-label">الدولة</label><input type="text" name="country" class="form-control" value="{{ old('country') }}"></div>
+                            <div class="col-md-6">
+                                <label class="form-label">المدينة</label>
+                                <select name="city" class="form-select">
+                                    <option value="">اختر المدينة</option>
+                                    @foreach ($companyCities as $city)
+                                        <option value="{{ $city }}" {{ old('city') === $city ? 'selected' : '' }}>{{ $city }}</option>
+                                    @endforeach
+                                </select>
+                                <div class="form-text">الدولة المعتمدة: {{ $companyCountryLabel }}</div>
+                            </div>
+                            <div class="col-md-6"><label class="form-label">الدولة</label><input type="text" class="form-control" value="{{ $companyCountryLabel }}" readonly></div>
                             <div class="col-md-6"><label class="form-label">الرقم الضريبي</label><input type="text" name="tax_number" class="form-control" value="{{ old('tax_number') }}"></div>
                             <div class="col-md-6"><label class="form-label">الحد الائتماني</label><input type="number" name="credit_limit" class="form-control" min="0" step="0.01" value="{{ old('credit_limit', 0) }}"></div>
                             <div class="col-12"><label class="form-label">العنوان</label><textarea name="address" class="form-control" rows="3">{{ old('address') }}</textarea></div>
