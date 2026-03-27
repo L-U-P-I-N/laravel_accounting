@@ -23,6 +23,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -83,6 +84,8 @@ class AccountingPageController extends Controller
         $invoice = DB::transaction(function () use ($company, $validated, $user) {
             $totals = $this->calculateInvoiceTotals($validated);
 
+            $this->ensureInvoiceCanBePosted($validated, $totals);
+
             $invoice = Invoice::create([
                 'invoice_number' => $this->documentNumberGenerator->nextInvoiceNumber($company->id),
                 'customer_id' => $validated['customer_id'],
@@ -103,7 +106,10 @@ class AccountingPageController extends Controller
             ]);
 
             $this->syncInvoiceItems($invoice, $validated);
-            $this->accountingService->syncInvoiceEntry($invoice->fresh(['items.product', 'customer']), $user);
+
+            if (($validated['status'] ?? 'sent') !== 'draft') {
+                $this->accountingService->syncInvoiceEntry($invoice->fresh(['items.product', 'customer']), $user);
+            }
 
             return $invoice;
         });
@@ -132,11 +138,23 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         abort_if((int) $invoice->company_id !== (int) $company->id, 404);
 
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
         if ($invoice->status !== 'draft') {
             return redirect()->route('invoices')->with('status', 'الفاتورة ليست في حالة مسودة.');
         }
 
-        $invoice->update(['status' => 'sent']);
+        if ((float) $invoice->total <= 0) {
+            return redirect()
+                ->route('invoices.show', $invoice)
+                ->with('error', 'لا يمكن اعتماد فاتورة بإجمالي صفر. عدل البنود أولاً.');
+        }
+
+        DB::transaction(function () use ($invoice, $user) {
+            $invoice->update(['status' => 'sent']);
+            $this->accountingService->syncInvoiceEntry($invoice->fresh(['items.product', 'customer']), $user);
+        });
 
         return redirect()->route('invoices')->with('status', 'تم اعتماد الفاتورة وإرسالها بنجاح.');
     }
@@ -1763,6 +1781,22 @@ class AccountingPageController extends Controller
             'tax_amount' => round($taxAmount, 2),
             'total' => round($subtotal + $taxAmount, 2),
         ];
+    }
+
+    private function ensureInvoiceCanBePosted(array $validated, array $totals): void
+    {
+        if (($validated['status'] ?? 'sent') === 'draft') {
+            return;
+        }
+
+        if ((float) ($totals['total'] ?? 0) > 0) {
+            return;
+        }
+
+        $validator = Validator::make([], []);
+        $validator->errors()->add('item_price', 'إجمالي الفاتورة يجب أن يكون أكبر من صفر قبل الحفظ كفاتورة مرسلة.');
+
+        throw new ValidationException($validator);
     }
 
     private function syncInvoiceItems(Invoice $invoice, array $validated): void
