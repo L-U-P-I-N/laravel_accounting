@@ -4,6 +4,7 @@
 
 @php
     $canManageInvoices = auth()->user()->hasPermission('manage_invoices');
+    $defaultTaxRate = $defaultTaxRate ?? 15; // fallback when controller does not provide rate
 @endphp
 
 @push('styles')
@@ -76,7 +77,7 @@
 
 <div class="invoice-form">
     @php
-        $invoiceItems = collect(old('item_description', ['']))->map(function ($description, $index) {
+        $invoiceItems = collect(old('item_description', ['']))->map(function ($description, $index) use ($defaultTaxRate) {
             return (object) [
                 'product_id' => old('item_product_id.' . $index),
                 'description' => $description,
