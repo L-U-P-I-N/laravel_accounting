@@ -14,6 +14,7 @@ class Product extends Model
     protected $fillable = [
         'company_id',
         'supplier_id',
+        'category_id',
         'name',
         'name_ar',
         'code',
@@ -45,6 +46,11 @@ class Product extends Model
     public function supplier(): BelongsTo
     {
         return $this->belongsTo(Supplier::class);
+    }
+
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(Category::class);
     }
 
     public function purchaseItems(): HasMany

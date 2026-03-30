@@ -3,30 +3,39 @@
 namespace App\Http\Controllers;
 
 use App\Models\Account;
+use App\Models\Branch;
+use App\Models\Category;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Employee;
 use App\Models\Expense;
 use App\Models\Invoice;
+use App\Models\InvoiceItem;
 use App\Models\JournalEntry;
+use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
+use App\Models\SalesChannel;
 use App\Models\Supplier;
 use App\Models\TaxSetting;
 use App\Support\AccountingService;
 use App\Support\DocumentNumberGenerator;
 use App\Support\ReferenceGenerator;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AccountingPageController extends Controller
 {
@@ -43,7 +52,7 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         $statusFilter = $request->string('status')->toString() ?: 'all';
         $tabs = [
-            'all' => ['label' => 'جميع الفواتير', 'icon' => 'fa-list'],
+            'all' => ['label' => 'جميع المبيعات', 'icon' => 'fa-list'],
             'draft' => ['label' => 'مسودة', 'icon' => 'fa-edit'],
             'sent' => ['label' => 'مرسلة', 'icon' => 'fa-paper-plane'],
             'paid' => ['label' => 'مدفوعة', 'icon' => 'fa-check-circle'],
@@ -66,30 +75,45 @@ class AccountingPageController extends Controller
     public function invoiceCreate(Request $request): View
     {
         $company = $this->company($request);
-        $customers = Customer::where('company_id', $company->id)->orderBy('name')->get();
-        $products = Product::forCompany($company->id)->active()->orderBy('name')->get();
-        $defaultTaxRate = 15;
 
-        return view('invoice_form', compact('company', 'customers', 'products', 'defaultTaxRate'));
+        return $this->invoiceFormView($company);
+    }
+
+    public function invoiceEdit(Request $request, Invoice $invoice): View
+    {
+        $company = $this->company($request);
+        abort_if((int) $invoice->company_id !== (int) $company->id, 404);
+
+        return $this->invoiceFormView($company, $invoice);
     }
 
     public function storeInvoice(Request $request): RedirectResponse
     {
         $company = $this->company($request);
         $validated = $this->validateInvoiceData($request, $company->id);
+        $stockRequirements = $this->invoiceStockRequirementsFromValidated($validated);
 
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        $invoice = DB::transaction(function () use ($company, $validated, $user) {
+        $invoice = DB::transaction(function () use ($company, $validated, $stockRequirements, $user) {
             $totals = $this->calculateInvoiceTotals($validated);
 
             $this->ensureInvoiceCanBePosted($validated, $totals);
+            $this->ensureInvoiceStockAvailability($company->id, $stockRequirements);
+
+            if ($this->shouldConsumeInvoiceStock($validated['status'] ?? 'sent')) {
+                $this->consumeInvoiceStock($company->id, $stockRequirements);
+            }
 
             $invoice = Invoice::create([
                 'invoice_number' => $this->documentNumberGenerator->nextInvoiceNumber($company->id),
                 'customer_id' => $validated['customer_id'],
+                'employee_id' => $validated['employee_id'] ?? null,
                 'company_id' => $company->id,
+                'branch_id' => $validated['branch_id'],
+                'sales_channel_id' => $validated['sales_channel_id'],
+                'payment_method_id' => $validated['payment_method_id'],
                 'invoice_date' => $validated['invoice_date'],
                 'due_date' => $validated['due_date'] ?? null,
                 'subtotal' => $totals['subtotal'],
@@ -115,6 +139,89 @@ class AccountingPageController extends Controller
         });
 
         return redirect()->route('invoices.show', $invoice)->with('status', 'تم إنشاء الفاتورة وربطها بقيد محاسبي آلي.');
+    }
+
+    public function updateInvoice(Request $request, Invoice $invoice): RedirectResponse
+    {
+        $company = $this->company($request);
+        abort_if((int) $invoice->company_id !== (int) $company->id, 404);
+
+        $validated = $this->validateInvoiceData($request, $company->id);
+        $stockRequirements = $this->invoiceStockRequirementsFromValidated($validated);
+        $nextStatus = (string) ($validated['status'] ?? $invoice->status);
+
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        DB::transaction(function () use ($invoice, $validated, $stockRequirements, $nextStatus, $company, $user) {
+            $invoice->loadMissing(['items.product', 'customer']);
+
+            if ($this->shouldConsumeInvoiceStock((string) $invoice->status)) {
+                $this->restoreInvoiceStock($company->id, $this->invoiceStockRequirementsFromItems($invoice->items));
+            }
+
+            $totals = $this->calculateInvoiceTotals($validated);
+
+            $this->ensureInvoiceCanBePosted($validated, $totals);
+            $this->ensureInvoiceStockAvailability($company->id, $stockRequirements);
+
+            if ($this->shouldConsumeInvoiceStock($nextStatus)) {
+                $this->consumeInvoiceStock($company->id, $stockRequirements);
+            }
+
+            $invoice->update([
+                'customer_id' => $validated['customer_id'],
+                'employee_id' => $validated['employee_id'] ?? null,
+                'invoice_date' => $validated['invoice_date'],
+                'due_date' => $validated['due_date'] ?? null,
+                'branch_id' => $validated['branch_id'],
+                'sales_channel_id' => $validated['sales_channel_id'],
+                'payment_method_id' => $validated['payment_method_id'],
+                'subtotal' => $totals['subtotal'],
+                'tax_amount' => $totals['tax_amount'],
+                'total' => $totals['total'],
+                'balance_due' => round(max($totals['total'] - (float) $invoice->paid_amount, 0), 2),
+                'status' => $nextStatus,
+                'payment_status' => $this->invoicePaymentStatus((float) $invoice->paid_amount, $totals['total']),
+                'notes' => $validated['notes'] ?? null,
+                'terms' => $validated['terms'] ?? null,
+                'currency' => $company->currency,
+                'exchange_rate' => 1,
+            ]);
+
+            $this->syncInvoiceItems($invoice, $validated);
+
+            if ($this->shouldConsumeInvoiceStock($nextStatus)) {
+                $this->accountingService->syncInvoiceEntry($invoice->fresh(['items.product', 'customer']), $user);
+            } else {
+                $this->accountingService->deleteAutomaticEntriesForSource($invoice);
+            }
+        });
+
+        return redirect()->route('invoices.show', $invoice)->with('status', 'تم تحديث الفاتورة وتعديل المخزون المرتبط بها بنجاح.');
+    }
+
+    public function destroyInvoice(Request $request, Invoice $invoice): RedirectResponse
+    {
+        $company = $this->company($request);
+        abort_if((int) $invoice->company_id !== (int) $company->id, 404);
+
+        if ((float) $invoice->paid_amount > 0) {
+            return redirect()->route('invoices.show', $invoice)->with('error', 'لا يمكن حذف فاتورة تم تسجيل دفعات عليها.');
+        }
+
+        DB::transaction(function () use ($invoice, $company) {
+            $invoice->loadMissing('items.product');
+
+            if ($this->shouldConsumeInvoiceStock((string) $invoice->status)) {
+                $this->restoreInvoiceStock($company->id, $this->invoiceStockRequirementsFromItems($invoice->items));
+            }
+
+            $this->accountingService->deleteAutomaticEntriesForSource($invoice);
+            $invoice->delete();
+        });
+
+        return redirect()->route('invoices')->with('status', 'تم حذف الفاتورة وعكس المخزون والقيد المحاسبي المرتبط بها.');
     }
 
     public function invoiceShow(Request $request, Invoice $invoice): View
@@ -151,24 +258,19 @@ class AccountingPageController extends Controller
                 ->with('error', 'لا يمكن اعتماد فاتورة بإجمالي صفر. عدل البنود أولاً.');
         }
 
-        DB::transaction(function () use ($invoice, $user) {
+        DB::transaction(function () use ($invoice, $company, $user) {
+            $invoice->loadMissing('items.product');
+
+            $stockRequirements = $this->invoiceStockRequirementsFromItems($invoice->items);
+
+            $this->ensureInvoiceStockAvailability($company->id, $stockRequirements);
+            $this->consumeInvoiceStock($company->id, $stockRequirements);
+
             $invoice->update(['status' => 'sent']);
             $this->accountingService->syncInvoiceEntry($invoice->fresh(['items.product', 'customer']), $user);
         });
 
         return redirect()->route('invoices')->with('status', 'تم اعتماد الفاتورة وإرسالها بنجاح.');
-    }
-
-    public function invoicePdf(Request $request, Invoice $invoice): View
-    {
-        $company = $this->company($request);
-        abort_if((int) $invoice->company_id !== (int) $company->id, 404);
-        $companyCountry = $this->countryConfigForCompany($company);
-
-        $invoice->load('customer');
-        $items = $this->invoiceItems($invoice);
-
-        return view('invoice_pdf', compact('company', 'companyCountry', 'invoice', 'items'));
     }
 
     public function purchases(Request $request): View
@@ -190,6 +292,8 @@ class AccountingPageController extends Controller
 
         $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get();
         $products = Product::forCompany($company->id)->active()->orderBy('name')->get();
+        $pendingPurchasesCount = $purchases->where('status', 'pending')->count();
+        $paidPurchasesCount = $purchases->whereIn('status', ['approved', 'paid'])->count();
 
         return view('purchases', [
             'company' => $company,
@@ -200,22 +304,8 @@ class AccountingPageController extends Controller
             'supplierFilter' => $supplierFilter,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
-        ]);
-    }
-
-    public function purchasePrint(Request $request, Purchase $purchase): View
-    {
-        $company = $this->company($request);
-        abort_if((int) $purchase->company_id !== (int) $company->id, 404);
-        $companyCountry = $this->countryConfigForCompany($company);
-
-        $purchase->load(['supplier', 'items.product']);
-
-        return view('purchase_print', [
-            'company' => $company,
-            'companyCountry' => $companyCountry,
-            'purchase' => $purchase,
-            'printMode' => $request->boolean('print', true),
+            'pendingPurchasesCount' => $pendingPurchasesCount,
+            'paidPurchasesCount' => $paidPurchasesCount,
         ]);
     }
 
@@ -223,15 +313,21 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
         $validated = $this->validatePurchaseData($request, $company->id);
+        $paymentStatus = $validated['payment_status'] ?? 'pending';
+        $paymentMethod = $paymentStatus === 'pending' ? 'payables' : ($validated['payment_method'] ?? null);
+        $paymentDate = $paymentStatus === 'pending' ? null : ($validated['payment_date'] ?? null);
 
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        DB::transaction(function () use ($company, $validated, $user) {
+        DB::transaction(function () use ($company, $validated, $user, $request, $paymentStatus, $paymentMethod, $paymentDate) {
             $totals = $this->calculatePurchaseTotals($validated);
+            $attachmentPath = $this->handlePurchaseAttachmentUpload($request);
 
             $purchase = Purchase::create([
                 'purchase_number' => $this->documentNumberGenerator->nextPurchaseNumber($company->id),
+                'supplier_invoice_number' => $validated['supplier_invoice_number'] ?? null,
+                'attachment_path' => $attachmentPath,
                 'supplier_id' => $validated['supplier_id'],
                 'company_id' => $company->id,
                 'purchase_date' => $validated['purchase_date'],
@@ -242,7 +338,9 @@ class AccountingPageController extends Controller
                 'paid_amount' => 0,
                 'balance_due' => $totals['total'],
                 'status' => $validated['status'] ?? 'draft',
-                'payment_status' => 'pending',
+                'payment_status' => $paymentStatus,
+                'payment_method' => $paymentMethod,
+                'payment_date' => $paymentDate,
                 'notes' => $validated['notes'] ?? null,
                 'currency' => $company->currency,
                 'exchange_rate' => 1,
@@ -260,15 +358,21 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         abort_if((int) $purchase->company_id !== (int) $company->id, 404);
 
-        $validated = $this->validatePurchaseData($request, $company->id);
+        $validated = $this->validatePurchaseData($request, $company->id, $purchase);
+        $paymentStatus = $validated['payment_status'] ?? $purchase->payment_status;
+        $paymentMethod = $paymentStatus === 'pending' ? 'payables' : ($validated['payment_method'] ?? null);
+        $paymentDate = $paymentStatus === 'pending' ? null : ($validated['payment_date'] ?? null);
 
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        DB::transaction(function () use ($purchase, $validated, $company, $user) {
+        DB::transaction(function () use ($purchase, $validated, $company, $user, $request, $paymentStatus, $paymentMethod, $paymentDate) {
             $totals = $this->calculatePurchaseTotals($validated);
+            $attachmentPath = $this->handlePurchaseAttachmentUpload($request, $purchase);
 
             $purchase->update([
+                'supplier_invoice_number' => $validated['supplier_invoice_number'] ?? null,
+                'attachment_path' => $attachmentPath,
                 'supplier_id' => $validated['supplier_id'],
                 'purchase_date' => $validated['purchase_date'],
                 'due_date' => $validated['due_date'] ?? null,
@@ -277,7 +381,9 @@ class AccountingPageController extends Controller
                 'total' => $totals['total'],
                 'balance_due' => max($totals['total'] - (float) $purchase->paid_amount, 0),
                 'status' => $validated['status'] ?? $purchase->status,
-                'payment_status' => (float) $purchase->paid_amount >= $totals['total'] ? 'paid' : ((float) $purchase->paid_amount > 0 ? 'partial' : 'pending'),
+                'payment_status' => $paymentStatus,
+                'payment_method' => $paymentMethod,
+                'payment_date' => $paymentDate,
                 'notes' => $validated['notes'] ?? null,
                 'currency' => $company->currency,
             ]);
@@ -300,7 +406,6 @@ class AccountingPageController extends Controller
 
         $purchase->update([
             'status' => 'approved',
-            'payment_status' => (float) $purchase->paid_amount >= (float) $purchase->total ? 'paid' : ((float) $purchase->paid_amount > 0 ? 'partial' : 'pending'),
         ]);
 
         return redirect()->route('purchases')->with('status', 'تم اعتماد طلب الشراء بنجاح.');
@@ -317,10 +422,44 @@ class AccountingPageController extends Controller
 
         DB::transaction(function () use ($purchase) {
             $this->accountingService->deleteAutomaticEntriesForSource($purchase);
+
+            if ($purchase->attachment_path) {
+                Storage::disk('public')->delete($purchase->attachment_path);
+            }
+
             $purchase->delete();
         });
 
         return redirect()->route('purchases')->with('status', 'تم حذف طلب الشراء بنجاح.');
+    }
+
+    public function purchasePrint(Request $request, Purchase $purchase): View
+    {
+        $company = $this->company($request);
+        abort_if((int) $purchase->company_id !== (int) $company->id, 404);
+
+        $purchase->loadMissing(['supplier', 'items.product']);
+        $supplier = $purchase->supplier;
+        $companyCountry = $this->countryLabel($company->country_code);
+        $supplierCountry = $supplier?->country ?: ($supplier ? $companyCountry : '-');
+
+        return view('purchase_print', [
+            'company' => $company,
+            'companyCountry' => $companyCountry,
+            'supplier' => $supplier,
+            'supplierCountry' => $supplierCountry,
+            'purchase' => $purchase,
+        ]);
+    }
+
+    public function showPurchaseAttachment(Request $request, Purchase $purchase): StreamedResponse
+    {
+        $company = $this->company($request);
+        abort_if((int) $purchase->company_id !== (int) $company->id, 404);
+        abort_if(! $purchase->attachment_path, 404);
+        abort_if(! Storage::disk('public')->exists($purchase->attachment_path), 404);
+
+        return Storage::disk('public')->response($purchase->attachment_path);
     }
 
     public function customers(Request $request): View
@@ -677,53 +816,6 @@ class AccountingPageController extends Controller
         ]);
     }
 
-    public function expensesReport(Request $request): View
-    {
-        $company = $this->company($request);
-        $filters = $request->validate([
-            'search' => ['nullable', 'string', 'max:255'],
-            'date_from' => ['nullable', 'date'],
-            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
-            'expense_account_id' => [
-                'nullable',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
-            ],
-            'expense_id' => [
-                'nullable',
-                Rule::exists('expenses', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
-            ],
-            'print' => ['nullable', 'boolean'],
-        ]);
-
-        $expenses = $this->expenseReportQuery($company->id, $filters)
-            ->orderByDesc('expense_date')
-            ->orderByDesc('id')
-            ->get();
-
-        $summary = [
-            'count' => $expenses->count(),
-            'total' => (float) $expenses->sum('total'),
-            'tax' => (float) $expenses->sum('tax_amount'),
-            'average' => $expenses->isNotEmpty() ? (float) $expenses->avg('total') : 0.0,
-        ];
-
-        $filterSummary = array_values(array_filter([
-            ! empty($filters['search']) ? 'بحث: ' . $filters['search'] : null,
-            ! empty($filters['date_from']) ? 'من: ' . $filters['date_from'] : null,
-            ! empty($filters['date_to']) ? 'إلى: ' . $filters['date_to'] : null,
-            ! empty($filters['expense_account_id']) ? 'حساب المصروف: ' . optional(Account::find($filters['expense_account_id']))->name : null,
-            ! empty($filters['expense_id']) ? 'مصروف محدد: ' . optional(Expense::find($filters['expense_id']))->name : null,
-        ]));
-
-        return view('expenses_report', [
-            'company' => $company,
-            'expenses' => $expenses,
-            'summary' => $summary,
-            'filterSummary' => $filterSummary,
-            'printMode' => $request->boolean('print'),
-        ]);
-    }
-
     public function storeExpense(Request $request): RedirectResponse
     {
         $company = $this->company($request);
@@ -1021,53 +1113,18 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
 
-        $reportTypes = [
-            'income_statement' => [
-                'label' => 'قائمة الدخل',
-                'description' => 'مقارنة الإيرادات بالمشتريات والمصروفات للوصول إلى صافي الربح.',
-                'focus' => null,
-            ],
-            'account_balances' => [
-                'label' => 'أرصدة الحسابات',
-                'description' => 'عرض حركة وأرصدة شجرة الحسابات أو حساب محدد.',
-                'focus' => 'account',
-            ],
-            'product_sales' => [
-                'label' => 'مبيعات المنتجات',
-                'description' => 'تحليل مبيعات كل المنتجات أو منتج محدد خلال فترة معينة.',
-                'focus' => 'product',
-            ],
-            'expense_details' => [
-                'label' => 'تفاصيل المصروفات',
-                'description' => 'تقرير بالمصروفات المسجلة أو مصروف محدد بالتفصيل.',
-                'focus' => 'expense',
-            ],
-            'receivables' => [
-                'label' => 'الذمم المدينة',
-                'description' => 'أرصدة العملاء المستحقة أو عميل محدد.',
-                'focus' => 'customer',
-            ],
-            'payables' => [
-                'label' => 'الذمم الدائنة',
-                'description' => 'أرصدة الموردين المستحقة أو مورد محدد.',
-                'focus' => 'supplier',
-            ],
-            'tax_summary' => [
-                'label' => 'تقرير الضرائب',
-                'description' => 'ملخص ضريبة المخرجات وضريبة المدخلات وصافي الالتزام الضريبي خلال الفترة.',
-                'focus' => null,
-            ],
-        ];
+        if ($request->boolean('print')) {
+            return view('reports_print', $this->legacyReportsViewData($request, $company));
+        }
 
-        $periodOptions = [
-            'monthly' => 'شهري',
-            'quarterly' => 'ربع سنوي',
-            'yearly' => 'سنوي',
-            'custom' => 'مخصص',
-        ];
+        $sections = $this->interactiveReportSections();
+        $catalog = $this->interactiveReportCatalog();
+        $periodOptions = $this->interactivePeriodOptions();
 
         $validated = $request->validate([
-            'report_type' => ['nullable', Rule::in(array_keys($reportTypes))],
+            'section' => ['nullable', Rule::in(array_keys($sections))],
+            'report' => ['nullable', Rule::in(array_keys($catalog))],
+            'report_type' => ['nullable', 'string'],
             'period' => ['nullable', Rule::in(array_keys($periodOptions))],
             'date_from' => [
                 'nullable',
@@ -1080,30 +1137,8 @@ class AccountingPageController extends Controller
                 Rule::requiredIf(fn () => $request->input('period') === 'custom'),
                 'after_or_equal:date_from',
             ],
-            'account_id' => [
-                'nullable',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
-            ],
-            'product_id' => [
-                'nullable',
-                Rule::exists('products', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
-            ],
-            'expense_id' => [
-                'nullable',
-                Rule::exists('expenses', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
-            ],
-            'customer_id' => [
-                'nullable',
-                Rule::exists('customers', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
-            ],
-            'supplier_id' => [
-                'nullable',
-                Rule::exists('suppliers', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
-            ],
-            'print' => ['nullable', 'boolean'],
         ]);
 
-        $selectedReportType = $validated['report_type'] ?? 'income_statement';
         $selectedPeriod = $validated['period'] ?? config('accounting.reports.default_period', 'monthly');
         [$dateFrom, $dateTo] = $this->resolveReportRange(
             $selectedPeriod,
@@ -1111,24 +1146,198 @@ class AccountingPageController extends Controller
             $validated['date_to'] ?? null,
         );
 
+        $initialReportKey = $validated['report']
+            ?? $this->legacyReportTypeToInteractiveKey($validated['report_type'] ?? null)
+            ?? 'sales_by_invoice';
+
+        if (! array_key_exists($initialReportKey, $catalog)) {
+            $initialReportKey = 'sales_by_invoice';
+        }
+
+        $initialSection = $validated['section'] ?? ($catalog[$initialReportKey]['section'] ?? 'sales');
+
+        if (! array_key_exists($initialSection, $sections)) {
+            $initialSection = $catalog[$initialReportKey]['section'] ?? 'sales';
+        }
+
+        $stats = $this->reportSummaryStats($company->id, $dateFrom, $dateTo);
+        $openPayables = (float) Purchase::where('company_id', $company->id)->sum('balance_due');
+        $netVat = (float) Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('tax_amount')
+            - (
+                (float) Purchase::where('company_id', $company->id)
+                    ->whereIn('status', ['approved', 'partial', 'paid'])
+                    ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+                    ->sum('tax_amount')
+                + (float) Expense::where('company_id', $company->id)
+                    ->whereBetween('expense_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+                    ->sum('tax_amount')
+            );
+
+        $sectionCounts = collect($catalog)
+            ->groupBy('section')
+            ->map(fn (Collection $items) => $items->count())
+            ->all();
+
+        return view('reports', [
+            'company' => $company,
+            'sections' => $sections,
+            'sectionCounts' => $sectionCounts,
+            'reportCatalog' => $catalog,
+            'periodOptions' => $periodOptions,
+            'selectedPeriod' => $selectedPeriod,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'initialSection' => $initialSection,
+            'initialReportKey' => $initialReportKey,
+            'dashboardStats' => [
+                ['label' => 'إيرادات الفترة', 'value' => (float) $stats['total_revenue'], 'icon' => 'fa-sack-dollar', 'tone' => 'primary'],
+                ['label' => 'صافي الربح', 'value' => (float) $stats['net_profit'], 'icon' => 'fa-chart-line', 'tone' => 'success'],
+                ['label' => 'الذمم الدائنة', 'value' => $openPayables, 'icon' => 'fa-file-invoice-dollar', 'tone' => 'warning'],
+                ['label' => 'صافي الضريبة', 'value' => $netVat, 'icon' => 'fa-percent', 'tone' => 'accent'],
+            ],
+        ]);
+    }
+
+    public function reportShow(Request $request, string $report): View
+    {
+        $company = $this->company($request);
+        $catalog = $this->interactiveReportCatalog();
+        $periodOptions = $this->interactivePeriodOptions();
+
+        abort_unless(array_key_exists($report, $catalog), 404);
+
+        $validated = $request->validate([
+            'period' => ['nullable', Rule::in(array_keys($periodOptions))],
+            'date_from' => [
+                'nullable',
+                'date',
+                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+            ],
+            'date_to' => [
+                'nullable',
+                'date',
+                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                'after_or_equal:date_from',
+            ],
+        ]);
+
+        $selectedPeriod = $validated['period'] ?? config('accounting.reports.default_period', 'monthly');
+        [$dateFrom, $dateTo] = $this->resolveReportRange(
+            $selectedPeriod,
+            $validated['date_from'] ?? null,
+            $validated['date_to'] ?? null,
+        );
+
+        $reportPayload = $this->buildInteractiveReportResponse($company, $report, $dateFrom, $dateTo);
+
+        if ($request->boolean('print')) {
+            return view('reports_show_print', [
+                'company' => $company,
+                'reportKey' => $report,
+                'reportMeta' => $catalog[$report],
+                'reportPayload' => $reportPayload,
+                'periodOptions' => $periodOptions,
+                'selectedPeriod' => $selectedPeriod,
+                'dateFrom' => $dateFrom,
+                'dateTo' => $dateTo,
+                'printMode' => true,
+            ]);
+        }
+
+        return view('reports_show', [
+            'company' => $company,
+            'reportKey' => $report,
+            'reportMeta' => $catalog[$report],
+            'reportPayload' => $reportPayload,
+            'printReportType' => $this->interactiveKeyToLegacyReportType($report),
+            'periodOptions' => $periodOptions,
+            'selectedPeriod' => $selectedPeriod,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+        ]);
+    }
+
+    public function reportQuery(Request $request): JsonResponse
+    {
+        $company = $this->company($request);
+        $catalog = $this->interactiveReportCatalog();
+        $periodOptions = $this->interactivePeriodOptions();
+
+        $validated = $request->validate([
+            'report' => ['required', Rule::in(array_keys($catalog))],
+            'period' => ['nullable', Rule::in(array_keys($periodOptions))],
+            'date_from' => [
+                'nullable',
+                'date',
+                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+            ],
+            'date_to' => [
+                'nullable',
+                'date',
+                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                'after_or_equal:date_from',
+            ],
+        ]);
+
+        $selectedPeriod = $validated['period'] ?? config('accounting.reports.default_period', 'monthly');
+        [$dateFrom, $dateTo] = $this->resolveReportRange(
+            $selectedPeriod,
+            $validated['date_from'] ?? null,
+            $validated['date_to'] ?? null,
+        );
+
+        return response()->json($this->buildInteractiveReportResponse($company, $validated['report'], $dateFrom, $dateTo));
+    }
+
+    private function legacyReportsViewData(Request $request, Company $company): array
+    {
+        $reportTypes = [
+            'income_statement' => ['label' => 'قائمة الدخل', 'description' => 'مقارنة الإيرادات بالمشتريات والمصروفات للوصول إلى صافي الربح.', 'focus' => null],
+            'account_balances' => ['label' => 'أرصدة الحسابات', 'description' => 'عرض حركة وأرصدة شجرة الحسابات أو حساب محدد.', 'focus' => 'account'],
+            'product_sales' => ['label' => 'مبيعات المنتجات', 'description' => 'تحليل مبيعات كل المنتجات أو منتج محدد خلال فترة معينة.', 'focus' => 'product'],
+            'expense_details' => ['label' => 'تفاصيل المصروفات', 'description' => 'تقرير بالمصروفات المسجلة أو مصروف محدد بالتفصيل.', 'focus' => 'expense'],
+            'receivables' => ['label' => 'الذمم المدينة', 'description' => 'أرصدة العملاء المستحقة أو عميل محدد.', 'focus' => 'customer'],
+            'payables' => ['label' => 'الذمم الدائنة', 'description' => 'أرصدة الموردين المستحقة أو مورد محدد.', 'focus' => 'supplier'],
+            'tax_summary' => ['label' => 'تقرير الضرائب', 'description' => 'ملخص ضريبة المخرجات وضريبة المدخلات وصافي الالتزام الضريبي خلال الفترة.', 'focus' => null],
+        ];
+
+        $periodOptions = $this->interactivePeriodOptions();
+
+        $validated = $request->validate([
+            'report_type' => ['nullable', Rule::in(array_keys($reportTypes))],
+            'period' => ['nullable', Rule::in(array_keys($periodOptions))],
+            'date_from' => ['nullable', 'date', Rule::requiredIf(fn () => $request->input('period') === 'custom')],
+            'date_to' => ['nullable', 'date', Rule::requiredIf(fn () => $request->input('period') === 'custom'), 'after_or_equal:date_from'],
+            'account_id' => ['nullable', Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
+            'product_id' => ['nullable', Rule::exists('products', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
+            'expense_id' => ['nullable', Rule::exists('expenses', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
+            'customer_id' => ['nullable', Rule::exists('customers', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
+            'supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
+            'print' => ['nullable', 'boolean'],
+        ]);
+
+        $selectedReportType = $validated['report_type'] ?? 'income_statement';
+        $selectedPeriod = $validated['period'] ?? config('accounting.reports.default_period', 'monthly');
+        [$dateFrom, $dateTo] = $this->resolveReportRange($selectedPeriod, $validated['date_from'] ?? null, $validated['date_to'] ?? null);
+
         $accounts = Account::where('company_id', $company->id)->orderBy('code')->get(['id', 'code', 'name', 'account_type']);
         $products = Product::forCompany($company->id)->active()->orderBy('name')->get(['id', 'name', 'code']);
-        $expenses = Expense::where('company_id', $company->id)
-            ->orderByDesc('expense_date')
-            ->get(['id', 'name', 'reference', 'expense_date', 'total']);
+        $expenses = Expense::where('company_id', $company->id)->orderByDesc('expense_date')->get(['id', 'name', 'reference', 'expense_date', 'total']);
         $customers = Customer::where('company_id', $company->id)->orderBy('name')->get(['id', 'name']);
         $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get(['id', 'name']);
 
         $stats = $this->reportSummaryStats($company->id, $dateFrom, $dateTo);
         $companyCountry = $this->countryConfigForCompany($company);
         $report = $this->buildReportData($company, $selectedReportType, $validated, $dateFrom, $dateTo, $reportTypes);
-        $reportRows = $report['rows'];
 
-        $viewData = [
+        return [
             'company' => $company,
             'companyCountry' => $companyCountry,
             'stats' => $stats,
-            'reportRows' => $reportRows,
+            'reportRows' => $report['rows'],
             'report' => $report,
             'reportTypes' => $reportTypes,
             'periodOptions' => $periodOptions,
@@ -1148,12 +1357,935 @@ class AccountingPageController extends Controller
             'selectedSupplierId' => isset($validated['supplier_id']) ? (int) $validated['supplier_id'] : null,
             'printMode' => $request->boolean('print'),
         ];
+    }
 
-        if ($request->boolean('print')) {
-            return view('reports_print', $viewData);
+    private function interactiveReportSections(): array
+    {
+        return [
+            'favorites' => ['label' => 'المفضلة', 'icon' => 'fa-star', 'summary' => 'الوصول السريع إلى التقارير التي تستخدمها أكثر.'],
+            'sales' => ['label' => 'المبيعات', 'icon' => 'fa-receipt', 'summary' => 'تقارير الأداء البيعي والفواتير والعملاء وحالات الدفع.'],
+            'inventory' => ['label' => 'المخزون', 'icon' => 'fa-boxes-stacked', 'summary' => 'رؤية فورية للمخزون والحركة والمنتجات الأسرع دوراناً.'],
+            'taxes' => ['label' => 'الضرائب', 'icon' => 'fa-percent', 'summary' => 'ملخصات الضريبة ومصادرها من المبيعات والمشتريات.'],
+            'warehouse' => ['label' => 'المخزن', 'icon' => 'fa-warehouse', 'summary' => 'استلامات الموردين وتغطية الحد الأدنى ومستوى الجاهزية.'],
+            'finance' => ['label' => 'المالية', 'icon' => 'fa-wallet', 'summary' => 'قائمة الدخل والذمم والمصروفات وأرصدة الحسابات.'],
+        ];
+    }
+
+    private function interactivePeriodOptions(): array
+    {
+        return [
+            'monthly' => 'هذا الشهر',
+            'quarterly' => 'هذا الربع',
+            'yearly' => 'هذه السنة',
+            'custom' => 'فترة مخصصة',
+        ];
+    }
+
+    private function interactiveReportCatalog(): array
+    {
+        return [
+            'sales_by_location' => ['section' => 'sales', 'icon' => 'fa-map-location-dot', 'title' => 'تقرير المبيعات لكل موقع', 'description' => 'تجميع المبيعات حسب الفروع والمواقع التشغيلية الفعلية داخل الشركة.', 'query_preview' => "SELECT b.name AS branch, SUM(s.total_amount) AS total_sales\nFROM sales s\nJOIN branches b ON s.branch_id = b.id\nGROUP BY b.name;"],
+            'sales_by_invoice' => ['section' => 'sales', 'icon' => 'fa-file-invoice-dollar', 'title' => 'تقرير المبيعات من كل فاتورة', 'description' => 'عرض تفصيلي لكل عملية بيع على مستوى المستند وقيمتها والضريبة المرتبطة بها.', 'query_preview' => "SELECT sale_number, total_amount, tax_amount, sale_date\nFROM sales\nWHERE company_id = ?\nORDER BY sale_date DESC;"],
+            'sales_by_category' => ['section' => 'sales', 'icon' => 'fa-layer-group', 'title' => 'المبيعات حسب الفئات', 'description' => 'تحليل المبيعات حسب فئات المنتجات المعتمدة في قاعدة البيانات.', 'query_preview' => "SELECT c.name, SUM(si.total_amount) AS total_sales\nFROM sales_items si\nJOIN categories c ON si.category_id = c.id\nJOIN sales s ON si.sale_id = s.id\nGROUP BY c.name;"],
+            'sales_by_employee' => ['section' => 'sales', 'icon' => 'fa-user-tie', 'title' => 'تقرير المبيعات من كل موظف', 'description' => 'تجميع عمليات البيع حسب الموظف المسؤول عن العملية عند وجود الربط.', 'query_preview' => "SELECT e.first_name, e.last_name, SUM(s.total_amount) AS total_sales\nFROM sales s\nLEFT JOIN employees e ON s.employee_id = e.id\nGROUP BY e.id, e.first_name, e.last_name;"],
+            'sales_by_payment_status' => ['section' => 'sales', 'icon' => 'fa-credit-card', 'title' => 'تقرير المبيعات لكل حالة دفع', 'description' => 'تحليل حجم المبيعات حسب حالة السداد الحالية والرصيد المتبقي.', 'query_preview' => "SELECT payment_status, SUM(total_amount)\nFROM sales\nGROUP BY payment_status;"],
+            'customer_transactions' => ['section' => 'sales', 'icon' => 'fa-arrows-rotate', 'title' => 'تقرير معاملات العملاء', 'description' => 'عدد المعاملات والإجمالي والمتبقي لكل عميل خلال الفترة المحددة.', 'query_preview' => "SELECT c.name, s.id, s.total_amount, s.sale_date\nFROM sales s\nJOIN customers c ON s.customer_id = c.id;"],
+            'sales_by_channel' => ['section' => 'sales', 'icon' => 'fa-store', 'title' => 'تقرير المبيعات من كل قناة بيع', 'description' => 'تجميع الإيرادات حسب قنوات البيع المسجلة على كل عملية.', 'query_preview' => "SELECT sc.name, SUM(s.total_amount)\nFROM sales s\nJOIN sales_channels sc ON s.channel_id = sc.id\nGROUP BY sc.name;"],
+            'sales_by_customer' => ['section' => 'sales', 'icon' => 'fa-users', 'title' => 'تقرير المبيعات من كل عميل', 'description' => 'إجمالي مبيعات كل عميل ومتوسط قيمة العملية وعدد العمليات.', 'query_preview' => "SELECT c.name, SUM(s.total_amount)\nFROM sales s\nJOIN customers c ON s.customer_id = c.id\nGROUP BY c.name;"],
+            'transactions_by_branch' => ['section' => 'sales', 'icon' => 'fa-building-circle-arrow-right', 'title' => 'تقرير المعاملات في كل موقع', 'description' => 'حصر عدد معاملات البيع المنفذة في كل فرع أو موقع تشغيل.', 'query_preview' => "SELECT b.name, COUNT(s.id) AS total_transactions\nFROM sales s\nJOIN branches b ON s.branch_id = b.id\nGROUP BY b.name;"],
+            'customer_product_sales' => ['section' => 'sales', 'icon' => 'fa-bag-shopping', 'title' => 'تقرير المنتجات المباعة للعميل', 'description' => 'تتبع المنتجات والكميات المباعة لكل عميل داخل الفترة المحددة.', 'query_preview' => "SELECT c.name, si.product_id, SUM(si.quantity)\nFROM sales_items si\nJOIN sales s ON si.sale_id = s.id\nJOIN customers c ON s.customer_id = c.id\nGROUP BY c.name, si.product_id;"],
+            'sales_by_period' => ['section' => 'sales', 'icon' => 'fa-calendar-days', 'title' => 'تقرير المبيعات حسب الفترة الزمنية', 'description' => 'تجميع المبيعات زمنياً لمراقبة الاتجاهات اليومية داخل الفترة.', 'query_preview' => "SELECT DATE(sale_date) AS day, SUM(total_amount)\nFROM sales\nGROUP BY DATE(sale_date)\nORDER BY DATE(sale_date);"],
+            'sales_by_payment_method' => ['section' => 'sales', 'icon' => 'fa-money-check-dollar', 'title' => 'تقرير المبيعات من طرق الدفع', 'description' => 'إجمالي المبيعات موزعة حسب طريقة الدفع المختارة داخل نموذج البيع.', 'query_preview' => "SELECT pm.name, SUM(invoices.total)\nFROM invoices\nJOIN payment_methods pm ON pm.id = invoices.payment_method_id\nWHERE invoices.company_id = ?\nGROUP BY pm.name;"],
+            'customer_statement' => ['section' => 'sales', 'icon' => 'fa-file-lines', 'title' => 'كشف حساب مدين', 'description' => 'إجمالي المبيعات والمدفوعات والمتبقي لكل عميل لعرض كشف حساب المدين.', 'query_preview' => "SELECT c.name, s.total_amount, p.amount AS paid, (s.total_amount - COALESCE(p.amount, 0)) AS remaining\nFROM sales s\nLEFT JOIN payments p ON s.id = p.invoice_id\nJOIN customers c ON s.customer_id = c.id;"],
+            'inventory_snapshot' => ['section' => 'inventory', 'icon' => 'fa-cubes', 'title' => 'لقطة المخزون الحالية', 'description' => 'عرض الكميات الحالية وقيمة المخزون لكل منتج بصورة فورية.', 'query_preview' => "SELECT name, stock_quantity, cost_price, (stock_quantity * cost_price) AS inventory_value\nFROM products\nWHERE company_id = ?\nORDER BY inventory_value DESC;"],
+            'low_stock_alerts' => ['section' => 'inventory', 'icon' => 'fa-triangle-exclamation', 'title' => 'تنبيهات انخفاض المخزون', 'description' => 'تحديد المنتجات التي وصلت إلى الحد الأدنى أو أقل منه لتسريع إعادة الطلب.', 'query_preview' => "SELECT name, stock_quantity, min_stock\nFROM products\nWHERE company_id = ? AND stock_quantity <= min_stock;"],
+            'sales_velocity' => ['section' => 'inventory', 'icon' => 'fa-gauge-high', 'title' => 'سرعة دوران المنتجات', 'description' => 'قياس المنتجات الأسرع مبيعاً بناءً على الكميات الخارجة خلال الفترة المحددة.', 'query_preview' => "SELECT COALESCE(products.name, invoice_items.description) AS product_name, SUM(invoice_items.quantity) AS sold_qty\nFROM invoice_items\nINNER JOIN invoices ON invoices.id = invoice_items.invoice_id\nLEFT JOIN products ON products.id = invoice_items.product_id\nWHERE invoices.company_id = ?\nGROUP BY COALESCE(products.name, invoice_items.description);"],
+            'tax_summary_live' => ['section' => 'taxes', 'icon' => 'fa-file-invoice', 'title' => 'ملخص الضرائب', 'description' => 'عرض صافي ضريبة المخرجات والمدخلات خلال الفترة بشكل لحظي.', 'query_preview' => "SELECT SUM(tax_amount) FROM invoices UNION ALL SELECT SUM(tax_amount) FROM purchases;"],
+            'tax_output_by_invoice' => ['section' => 'taxes', 'icon' => 'fa-receipt', 'title' => 'الضريبة من كل فاتورة', 'description' => 'متابعة ضريبة المخرجات على مستوى كل فاتورة مبيعات.', 'query_preview' => "SELECT invoice_number, tax_amount, total\nFROM invoices\nWHERE company_id = ? AND tax_amount > 0\nORDER BY invoice_date DESC;"],
+            'tax_input_by_supplier' => ['section' => 'taxes', 'icon' => 'fa-truck-ramp-box', 'title' => 'ضريبة المشتريات حسب المورد', 'description' => 'تجميع ضريبة المدخلات من المشتريات بحسب المورد لتسهيل التسويات الضريبية.', 'query_preview' => "SELECT suppliers.name, SUM(purchases.tax_amount) AS input_tax\nFROM purchases\nINNER JOIN suppliers ON suppliers.id = purchases.supplier_id\nWHERE purchases.company_id = ?\nGROUP BY suppliers.id, suppliers.name;"],
+            'warehouse_coverage' => ['section' => 'warehouse', 'icon' => 'fa-ruler-combined', 'title' => 'تغطية المخزون مقابل الحد الأدنى', 'description' => 'قياس الجاهزية التشغيلية لكل منتج بمقارنة الرصيد الحالي بالحد الأدنى.', 'query_preview' => "SELECT name, stock_quantity, min_stock\nFROM products\nWHERE company_id = ?\nORDER BY (stock_quantity - min_stock) ASC;"],
+            'warehouse_incoming' => ['section' => 'warehouse', 'icon' => 'fa-dolly', 'title' => 'الوارد من المشتريات', 'description' => 'عرض الكميات المستلمة من الموردين خلال الفترة على مستوى المنتج.', 'query_preview' => "SELECT COALESCE(products.name, purchase_items.description) AS product_name, SUM(purchase_items.quantity) AS incoming_qty\nFROM purchase_items\nINNER JOIN purchases ON purchases.id = purchase_items.purchase_id\nLEFT JOIN products ON products.id = purchase_items.product_id\nWHERE purchases.company_id = ?\nGROUP BY COALESCE(products.name, purchase_items.description);"],
+            'warehouse_suppliers' => ['section' => 'warehouse', 'icon' => 'fa-people-carry-box', 'title' => 'الوارد حسب المورد', 'description' => 'تحليل حجم التوريد وقيمة الاستلامات لكل مورد داخل الفترة.', 'query_preview' => "SELECT suppliers.name, SUM(purchases.total) AS total_received\nFROM purchases\nINNER JOIN suppliers ON suppliers.id = purchases.supplier_id\nWHERE purchases.company_id = ?\nGROUP BY suppliers.id, suppliers.name;"],
+            'finance_income_statement' => ['section' => 'finance', 'icon' => 'fa-chart-pie', 'title' => 'قائمة الدخل', 'description' => 'مقارنة الإيرادات بالمشتريات والمصروفات للوصول إلى صافي الربح.', 'query_preview' => "SELECT SUM(total) AS total_revenue FROM invoices WHERE company_id = ?;"],
+            'finance_receivables' => ['section' => 'finance', 'icon' => 'fa-hand-holding-dollar', 'title' => 'الذمم المدينة', 'description' => 'أرصدة العملاء المستحقة أو عميل محدد مع توضيح المتبقي المفتوح.', 'query_preview' => "SELECT customers.name, SUM(invoices.balance_due) AS balance_due\nFROM invoices\nINNER JOIN customers ON customers.id = invoices.customer_id\nWHERE invoices.company_id = ?\nGROUP BY customers.id, customers.name;"],
+            'finance_payables' => ['section' => 'finance', 'icon' => 'fa-money-bill-transfer', 'title' => 'الذمم الدائنة', 'description' => 'أرصدة الموردين المستحقة وقيم المشتريات والضرائب المرتبطة بها.', 'query_preview' => "SELECT suppliers.name, SUM(purchases.balance_due) AS balance_due\nFROM purchases\nINNER JOIN suppliers ON suppliers.id = purchases.supplier_id\nWHERE purchases.company_id = ?\nGROUP BY suppliers.id, suppliers.name;"],
+            'finance_expenses' => ['section' => 'finance', 'icon' => 'fa-file-circle-minus', 'title' => 'تفاصيل المصروفات', 'description' => 'تقرير بالمصروفات المسجلة ومراجعها وحساباتها خلال الفترة.', 'query_preview' => "SELECT reference, total, expense_date\nFROM expenses\nWHERE company_id = ?\nORDER BY expense_date DESC;"],
+            'finance_accounts' => ['section' => 'finance', 'icon' => 'fa-sitemap', 'title' => 'أرصدة الحسابات', 'description' => 'عرض حركة وأرصدة شجرة الحسابات بالاعتماد على القيود اليومية المرحّلة.', 'query_preview' => "SELECT accounts.code, SUM(journal_lines.debit), SUM(journal_lines.credit)\nFROM journal_lines\nINNER JOIN accounts ON accounts.id = journal_lines.account_id\nGROUP BY accounts.id, accounts.code;"],
+        ];
+    }
+
+    private function legacyReportTypeToInteractiveKey(?string $legacyReportType): ?string
+    {
+        return match ($legacyReportType) {
+            'income_statement' => 'finance_income_statement',
+            'account_balances' => 'finance_accounts',
+            'product_sales' => 'sales_by_category',
+            'expense_details' => 'finance_expenses',
+            'receivables' => 'finance_receivables',
+            'payables' => 'finance_payables',
+            'tax_summary' => 'tax_summary_live',
+            default => null,
+        };
+    }
+
+    private function interactiveKeyToLegacyReportType(string $interactiveKey): string
+    {
+        return match ($interactiveKey) {
+            'finance_income_statement' => 'income_statement',
+            'finance_accounts' => 'account_balances',
+            'sales_by_category', 'sales_by_location', 'sales_by_invoice', 'sales_by_customer', 'sales_by_payment_status', 'customer_transactions', 'sales_by_employee', 'sales_by_channel', 'transactions_by_branch', 'customer_product_sales', 'sales_by_period', 'sales_by_payment_method' => 'product_sales',
+            'finance_expenses' => 'expense_details',
+            'finance_receivables', 'customer_statement' => 'receivables',
+            'finance_payables', 'warehouse_suppliers', 'warehouse_incoming' => 'payables',
+            'tax_summary_live', 'tax_output_by_invoice', 'tax_input_by_supplier' => 'tax_summary',
+            default => 'income_statement',
+        };
+    }
+
+    private function buildInteractiveReportResponse(Company $company, string $reportKey, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $catalog = $this->interactiveReportCatalog();
+        $meta = $catalog[$reportKey];
+
+        $report = match ($reportKey) {
+            'sales_by_location' => $this->salesByLocationInteractiveReport($company, $dateFrom, $dateTo),
+            'sales_by_invoice' => $this->salesByInvoiceInteractiveReport($company, $dateFrom, $dateTo),
+            'sales_by_category' => $this->salesByCategoryInteractiveReport($company, $dateFrom, $dateTo),
+            'sales_by_employee' => $this->salesByEmployeeInteractiveReport($company, $dateFrom, $dateTo),
+            'sales_by_payment_status' => $this->salesByPaymentStatusInteractiveReport($company, $dateFrom, $dateTo),
+            'customer_transactions' => $this->customerTransactionsInteractiveReport($company, $dateFrom, $dateTo),
+            'sales_by_channel' => $this->salesByChannelInteractiveReport($company, $dateFrom, $dateTo),
+            'sales_by_customer' => $this->salesByCustomerInteractiveReport($company, $dateFrom, $dateTo),
+            'transactions_by_branch' => $this->transactionsByBranchInteractiveReport($company, $dateFrom, $dateTo),
+            'customer_product_sales' => $this->customerProductSalesInteractiveReport($company, $dateFrom, $dateTo),
+            'sales_by_period' => $this->salesByPeriodInteractiveReport($company, $dateFrom, $dateTo),
+            'sales_by_payment_method' => $this->salesByPaymentMethodInteractiveReport($company, $dateFrom, $dateTo),
+            'customer_statement' => $this->customerStatementInteractiveReport($company, $dateFrom, $dateTo),
+            'inventory_snapshot' => $this->inventorySnapshotInteractiveReport($company),
+            'low_stock_alerts' => $this->lowStockAlertsInteractiveReport($company),
+            'sales_velocity' => $this->salesVelocityInteractiveReport($company, $dateFrom, $dateTo),
+            'tax_summary_live' => $this->interactiveFromLegacy($this->taxSummaryReport($company, $dateFrom, $dateTo)),
+            'tax_output_by_invoice' => $this->taxOutputByInvoiceInteractiveReport($company, $dateFrom, $dateTo),
+            'tax_input_by_supplier' => $this->taxInputBySupplierInteractiveReport($company, $dateFrom, $dateTo),
+            'warehouse_coverage' => $this->warehouseCoverageInteractiveReport($company),
+            'warehouse_incoming' => $this->warehouseIncomingInteractiveReport($company, $dateFrom, $dateTo),
+            'warehouse_suppliers' => $this->warehouseSuppliersInteractiveReport($company, $dateFrom, $dateTo),
+            'finance_income_statement' => $this->interactiveFromLegacy($this->incomeStatementReport($company, $dateFrom, $dateTo)),
+            'finance_receivables' => $this->interactiveFromLegacy($this->receivablesReport($company, [], $dateFrom, $dateTo)),
+            'finance_payables' => $this->interactiveFromLegacy($this->payablesReport($company, [], $dateFrom, $dateTo)),
+            'finance_expenses' => $this->interactiveFromLegacy($this->expenseDetailsReport($company, [], $dateFrom, $dateTo)),
+            default => $this->interactiveFromLegacy($this->accountBalancesReport($company, [], $dateFrom, $dateTo)),
+        };
+
+        return array_merge($report, [
+            'key' => $reportKey,
+            'section' => $meta['section'],
+            'title' => $meta['title'],
+            'description' => $meta['description'],
+            'query_preview' => $meta['query_preview'],
+            'value_format' => $report['value_format'] ?? 'currency',
+            'date_range_label' => sprintf('من %s إلى %s', $dateFrom->format('Y-m-d'), $dateTo->format('Y-m-d')),
+            'columns' => $report['columns'] ?? [
+                ['key' => 'label', 'label' => 'البند'],
+                ['key' => 'meta', 'label' => 'التفاصيل'],
+                ['key' => 'value', 'label' => 'القيمة', 'format' => 'currency'],
+            ],
+        ]);
+    }
+
+    private function interactiveFromLegacy(array $report): array
+    {
+        return [
+            'supported' => true,
+            'rows' => $report['rows'],
+            'chart' => $report['chart'],
+            'highlights' => $report['highlights'],
+            'value_format' => 'currency',
+            'empty_message' => $report['empty_message'],
+            'insight' => $report['rows']->isNotEmpty() ? 'أعلى بند حالياً: ' . $report['rows']->first()['label'] : $report['empty_message'],
+        ];
+    }
+
+    private function unsupportedInteractiveReport(string $message): array
+    {
+        return [
+            'supported' => false,
+            'rows' => collect(),
+            'chart' => ['type' => 'bar', 'labels' => [], 'values' => []],
+            'highlights' => [
+                ['label' => 'عدد النتائج', 'value' => 0, 'format' => 'number'],
+                ['label' => 'الإجمالي', 'value' => 0, 'format' => 'currency'],
+                ['label' => 'أعلى نتيجة', 'value' => 0, 'format' => 'currency'],
+            ],
+            'value_format' => 'currency',
+            'empty_message' => $message,
+            'insight' => $message,
+        ];
+    }
+
+    private function salesByLocationInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoices as i')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw("COALESCE(NULLIF(b.name, ''), 'غير محدد') as location_name, COALESCE(SUM(ii.total - ii.tax_amount), 0) as net_sales, COALESCE(SUM(ii.tax_amount), 0) as tax_amount, COALESCE(SUM(ii.total), 0) as gross_sales, COALESCE(SUM(ii.quantity), 0) as sold_qty, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as cogs")
+            ->groupBy('location_name')
+            ->orderByDesc('gross_sales')
+            ->get()
+            ->map(function ($row) {
+                $profit = (float) $row->net_sales - (float) $row->cogs;
+
+                return [
+                    'location' => $row->location_name,
+                    'sales' => (float) $row->net_sales,
+                    'cogs' => (float) $row->cogs,
+                    'profit' => $profit,
+                    'sales_tax' => (float) $row->tax_amount,
+                    'sales_with_tax' => (float) $row->gross_sales,
+                    'sold_quantity' => (float) $row->sold_qty,
+                    'returned_quantity' => 0,
+                    'label' => $row->location_name,
+                    'value' => (float) $row->gross_sales,
+                    'format' => 'currency',
+                ];
+            });
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد بيانات مبيعات موزعة على مواقع خلال الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'sales', 'label' => 'المبيعات', 'format' => 'currency'],
+            ['key' => 'cogs', 'label' => 'تكلفة البضاعة المباعة', 'format' => 'currency'],
+            ['key' => 'profit', 'label' => 'قيمة الربح', 'format' => 'currency'],
+            ['key' => 'sales_tax', 'label' => 'ضريبة المبيعات', 'format' => 'currency'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'sold_quantity', 'label' => 'الكمية المباعة', 'format' => 'number'],
+            ['key' => 'returned_quantity', 'label' => 'الكمية المرتجعة', 'format' => 'number'],
+        ];
+
+        return $report;
+    }
+
+    private function salesByInvoiceInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $summary = DB::table('invoices as i')
+            ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw('COUNT(DISTINCT i.id) as invoice_count, COALESCE(SUM(i.subtotal), 0) as total_sales, COALESCE(AVG(i.subtotal), 0) as average_invoice_sales, COALESCE(SUM(i.total), 0) as sales_with_tax, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as cogs, COALESCE(SUM(ii.quantity), 0) as sold_qty, COALESCE(SUM(ii.tax_amount), 0) as total_tax')
+            ->first();
+
+        $rows = collect();
+
+        if ($summary && (int) $summary->invoice_count > 0) {
+            $profit = (float) $summary->total_sales - (float) $summary->cogs;
+            $rows->push([
+                'total_sales' => (float) $summary->total_sales,
+                'total_invoices' => (int) $summary->invoice_count,
+                'average_invoice_sales' => (float) $summary->average_invoice_sales,
+                'sales_with_tax' => (float) $summary->sales_with_tax,
+                'total_cogs' => (float) $summary->cogs,
+                'total_profit' => $profit,
+                'total_sold_qty' => (float) $summary->sold_qty,
+                'total_returned_qty' => 0,
+                'vat_15' => (float) $summary->total_tax,
+                'vat_100' => 0,
+                'other_taxes' => 0,
+                'total_tax' => (float) $summary->total_tax,
+                'label' => 'ملخص الفواتير',
+                'value' => (float) $summary->sales_with_tax,
+                'format' => 'currency',
+            ]);
         }
 
-        return view('reports', $viewData);
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد فواتير مبيعات ضمن الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'total_sales', 'label' => 'إجمالي المبيعات', 'format' => 'currency'],
+            ['key' => 'total_invoices', 'label' => 'إجمالي الفواتير', 'format' => 'number'],
+            ['key' => 'average_invoice_sales', 'label' => 'متوسط مبيعات الفواتير', 'format' => 'currency'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'total_cogs', 'label' => 'إجمالي تكلفة البضاعة المباعة', 'format' => 'currency'],
+            ['key' => 'total_profit', 'label' => 'إجمالي قيمة الربح', 'format' => 'currency'],
+            ['key' => 'total_sold_qty', 'label' => 'إجمالي الكميات المباعة', 'format' => 'number'],
+            ['key' => 'total_returned_qty', 'label' => 'إجمالي الكميات المرتجعة', 'format' => 'number'],
+            ['key' => 'vat_15', 'label' => 'ضريبة المبيعات %15', 'format' => 'currency'],
+            ['key' => 'vat_100', 'label' => 'ضريبة المبيعات %100', 'format' => 'currency'],
+            ['key' => 'other_taxes', 'label' => 'الضرائب الأخرى', 'format' => 'currency'],
+            ['key' => 'total_tax', 'label' => 'إجمالي الضريبة', 'format' => 'currency'],
+        ];
+
+        return $report;
+    }
+
+    private function salesByCategoryInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $summary = DB::table('invoice_items as ii')
+            ->join('invoices as i', 'i.id', '=', 'ii.invoice_id')
+            ->leftJoin('categories as c', 'c.id', '=', 'ii.category_id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw('COUNT(DISTINCT c.id) as category_count, COALESCE(SUM(ii.total - ii.tax_amount), 0) as total_sales, COALESCE(SUM(ii.total), 0) as sales_with_tax, COALESCE(SUM(ii.quantity), 0) as sold_qty, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as cogs')
+            ->first();
+
+        $rows = collect();
+
+        if ($summary && ((int) $summary->category_count > 0 || (float) $summary->total_sales > 0)) {
+            $averageCategorySales = (int) $summary->category_count > 0
+                ? round((float) $summary->total_sales / (int) $summary->category_count, 2)
+                : 0;
+
+            $rows->push([
+                'total_sales' => (float) $summary->total_sales,
+                'total_categories' => (int) $summary->category_count,
+                'average_category_sales' => $averageCategorySales,
+                'sales_with_tax' => (float) $summary->sales_with_tax,
+                'total_sold_qty' => (float) $summary->sold_qty,
+                'total_returned_qty' => 0,
+                'total_cogs' => (float) $summary->cogs,
+                'total_profit' => round((float) $summary->total_sales - (float) $summary->cogs, 2),
+                'label' => 'ملخص الفئات',
+                'value' => (float) $summary->sales_with_tax,
+                'format' => 'currency',
+            ]);
+        }
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد بيانات مبيعات حسب الفئات خلال الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'total_sales', 'label' => 'إجمالي المبيعات', 'format' => 'currency'],
+            ['key' => 'total_categories', 'label' => 'إجمالي الفئات', 'format' => 'number'],
+            ['key' => 'average_category_sales', 'label' => 'متوسط مبيعات الفئات', 'format' => 'currency'],
+            ['key' => 'sales_with_tax', 'label' => 'إجمالي المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'total_sold_qty', 'label' => 'إجمالي الكميات المباعة', 'format' => 'number'],
+            ['key' => 'total_returned_qty', 'label' => 'إجمالي الكميات المرتجعة', 'format' => 'number'],
+            ['key' => 'total_cogs', 'label' => 'إجمالي تكلفة البضاعة المباعة', 'format' => 'currency'],
+            ['key' => 'total_profit', 'label' => 'إجمالي قيمة الربح', 'format' => 'currency'],
+        ];
+
+        return $report;
+    }
+
+    private function salesByEmployeeInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoices as i')
+            ->leftJoin('employees', 'employees.id', '=', 'i.employee_id')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->groupBy('employees.id', 'employees.first_name', 'employees.last_name', 'employees.position', 'b.name')
+            ->selectRaw("employees.first_name, employees.last_name, employees.position, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, COALESCE(SUM(ii.total - ii.tax_amount), 0) as net_sales, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as cogs, COALESCE(SUM(ii.total), 0) as gross_sales, COALESCE(SUM(ii.quantity), 0) as sold_qty")
+            ->orderByDesc('gross_sales')
+            ->get()
+            ->map(function ($row) {
+                $fullName = trim(implode(' / ', array_filter([
+                    trim(implode(' ', array_filter([$row->first_name, $row->last_name]))),
+                    $row->position,
+                ])));
+
+                return [
+                    'employee' => $fullName !== '' ? $fullName : 'غير محدد',
+                    'location' => $row->branch_name,
+                    'sales' => (float) $row->net_sales,
+                    'cogs' => (float) $row->cogs,
+                    'profit' => round((float) $row->net_sales - (float) $row->cogs, 2),
+                    'sales_with_tax' => (float) $row->gross_sales,
+                    'sold_quantity' => (float) $row->sold_qty,
+                    'returned_quantity' => 0,
+                    'label' => $fullName !== '' ? $fullName : 'غير محدد',
+                    'value' => (float) $row->gross_sales,
+                    'format' => 'currency',
+                ];
+            });
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد مبيعات مرتبطة بموظفين خلال الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'employee', 'label' => 'المستخدم / الوظيفة', 'format' => 'text'],
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'sales', 'label' => 'المبيعات', 'format' => 'currency'],
+            ['key' => 'cogs', 'label' => 'تكلفة البضاعة المباعة', 'format' => 'currency'],
+            ['key' => 'profit', 'label' => 'قيمة الربح', 'format' => 'currency'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'sold_quantity', 'label' => 'الكمية المباعة', 'format' => 'number'],
+            ['key' => 'returned_quantity', 'label' => 'الكمية المرتجعة', 'format' => 'number'],
+        ];
+
+        return $report;
+    }
+
+    private function salesByPaymentStatusInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $labels = ['paid' => 'مدفوع', 'partial' => 'جزئي', 'pending' => 'آجل'];
+
+        $rows = DB::table('invoices as i')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw("i.payment_status as status_key, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, COALESCE(SUM(ii.total - ii.tax_amount), 0) as net_sales, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as cogs, COALESCE(SUM(ii.total), 0) as gross_sales, COALESCE(SUM(ii.quantity), 0) as sold_qty")
+            ->groupBy('status_key', 'branch_name')
+            ->orderByDesc('gross_sales')
+            ->get()
+            ->map(fn ($row) => [
+                'payment_status' => $labels[$row->status_key] ?? $row->status_key,
+                'location' => $row->branch_name,
+                'sales' => (float) $row->net_sales,
+                'cogs' => (float) $row->cogs,
+                'profit' => round((float) $row->net_sales - (float) $row->cogs, 2),
+                'sales_with_tax' => (float) $row->gross_sales,
+                'sold_quantity' => (float) $row->sold_qty,
+                'returned_quantity' => 0,
+                'label' => $labels[$row->status_key] ?? $row->status_key,
+                'value' => (float) $row->gross_sales,
+                'format' => 'currency',
+            ]);
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد حالات دفع ضمن الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'payment_status', 'label' => 'حالة الدفع', 'format' => 'text'],
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'sales', 'label' => 'المبيعات', 'format' => 'currency'],
+            ['key' => 'cogs', 'label' => 'تكلفة البضاعة المباعة', 'format' => 'currency'],
+            ['key' => 'profit', 'label' => 'قيمة الربح', 'format' => 'currency'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'sold_quantity', 'label' => 'الكمية المباعة', 'format' => 'number'],
+            ['key' => 'returned_quantity', 'label' => 'الكمية المرتجعة', 'format' => 'number'],
+        ];
+
+        return $report;
+    }
+
+    private function customerTransactionsInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoices as i')
+            ->join('customers', 'customers.id', '=', 'i.customer_id')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->leftJoin('payment_methods as pm', 'pm.id', '=', 'i.payment_method_id')
+            ->leftJoin('sales_channels as sc', 'sc.id', '=', 'i.sales_channel_id')
+            ->leftJoin('employees', 'employees.id', '=', 'i.employee_id')
+            ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->groupBy('i.id', 'customers.name', 'customers.phone', 'b.name', 'i.invoice_number', 'i.invoice_date', 'i.paid_amount', 'i.total', 'pm.name', 'sc.name', 'employees.first_name', 'employees.last_name')
+            ->selectRaw("customers.name as customer_name, COALESCE(customers.phone, '') as customer_phone, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, i.invoice_number, i.invoice_date, COALESCE(SUM(ii.quantity), 0) as qty_per_transaction, i.paid_amount, i.total, COALESCE(NULLIF(pm.name, ''), 'غير محدد') as payment_method_name, COALESCE(NULLIF(sc.name, ''), 'غير محدد') as sales_channel_name, employees.first_name, employees.last_name")
+            ->orderByDesc('i.invoice_date')
+            ->get()
+            ->map(function ($row) {
+                $employeeName = trim(implode(' ', array_filter([$row->first_name, $row->last_name])));
+
+                return [
+                    'customer_name' => $row->customer_name,
+                    'customer_phone' => $row->customer_phone,
+                    'location' => $row->branch_name,
+                    'transaction_reference' => $row->invoice_number,
+                    'transaction_type' => 'بيع',
+                    'transaction_date' => $row->invoice_date,
+                    'quantity_per_transaction' => (float) $row->qty_per_transaction,
+                    'paid_amount' => (float) $row->paid_amount,
+                    'received_amount' => (float) $row->total,
+                    'payment_method' => $row->payment_method_name,
+                    'sales_channel' => $row->sales_channel_name,
+                    'user_name' => $employeeName !== '' ? $employeeName : 'غير محدد',
+                    'label' => $row->customer_name,
+                    'value' => (float) $row->total,
+                    'format' => 'currency',
+                ];
+            });
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد معاملات عملاء خلال الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'customer_name', 'label' => 'اسم العميل', 'format' => 'text'],
+            ['key' => 'customer_phone', 'label' => 'رقم هاتف العميل', 'format' => 'text'],
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'transaction_reference', 'label' => 'مرجع العملية', 'format' => 'text'],
+            ['key' => 'transaction_type', 'label' => 'نوع العملية', 'format' => 'text'],
+            ['key' => 'transaction_date', 'label' => 'تاريخ العملية', 'format' => 'date'],
+            ['key' => 'quantity_per_transaction', 'label' => 'الكمية لكل عملية', 'format' => 'number'],
+            ['key' => 'paid_amount', 'label' => 'المبلغ المدفوع', 'format' => 'currency'],
+            ['key' => 'received_amount', 'label' => 'المستلم', 'format' => 'currency'],
+            ['key' => 'payment_method', 'label' => 'طريقة الدفع', 'format' => 'text'],
+            ['key' => 'sales_channel', 'label' => 'قناة البيع', 'format' => 'text'],
+            ['key' => 'user_name', 'label' => 'المستخدم', 'format' => 'text'],
+        ];
+
+        return $report;
+    }
+
+    private function salesByChannelInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoices as i')
+            ->leftJoin('sales_channels as sc', 'sc.id', '=', 'i.sales_channel_id')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw("COALESCE(NULLIF(sc.name, ''), 'غير محدد') as channel_name, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, COALESCE(SUM(ii.total - ii.tax_amount), 0) as net_sales, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as cogs, COALESCE(SUM(ii.total), 0) as gross_sales, COALESCE(SUM(ii.quantity), 0) as sold_qty")
+            ->groupBy('channel_name', 'branch_name')
+            ->orderByDesc('gross_sales')
+            ->get()
+            ->map(fn ($row) => [
+                'sales_channel' => $row->channel_name,
+                'location' => $row->branch_name,
+                'sales' => (float) $row->net_sales,
+                'cogs' => (float) $row->cogs,
+                'profit' => round((float) $row->net_sales - (float) $row->cogs, 2),
+                'sales_with_tax' => (float) $row->gross_sales,
+                'sold_quantity' => (float) $row->sold_qty,
+                'returned_quantity' => 0,
+                'label' => $row->channel_name,
+                'value' => (float) $row->gross_sales,
+                'format' => 'currency',
+            ]);
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد قنوات بيع مسجلة خلال الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'sales_channel', 'label' => 'قناة البيع', 'format' => 'text'],
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'sales', 'label' => 'المبيعات', 'format' => 'currency'],
+            ['key' => 'cogs', 'label' => 'تكلفة البضاعة المباعة', 'format' => 'currency'],
+            ['key' => 'profit', 'label' => 'قيمة الربح', 'format' => 'currency'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'sold_quantity', 'label' => 'الكمية المباعة', 'format' => 'number'],
+            ['key' => 'returned_quantity', 'label' => 'الكمية المرتجعة', 'format' => 'number'],
+        ];
+
+        return $report;
+    }
+
+    private function salesByCustomerInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoices as i')
+            ->join('customers', 'customers.id', '=', 'i.customer_id')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw("customers.name as customer_name, COALESCE(customers.phone, '') as customer_phone, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, COALESCE(SUM(ii.total - ii.tax_amount), 0) as net_sales, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as cogs, COALESCE(SUM(ii.total), 0) as gross_sales, COALESCE(SUM(ii.quantity), 0) as sold_qty")
+            ->groupBy('customers.id', 'customers.name', 'customers.phone', 'branch_name')
+            ->orderByDesc('gross_sales')
+            ->get()
+            ->map(fn ($row) => [
+                'customer_name' => $row->customer_name,
+                'customer_phone' => $row->customer_phone,
+                'location' => $row->branch_name,
+                'sales' => (float) $row->net_sales,
+                'cogs' => (float) $row->cogs,
+                'profit' => round((float) $row->net_sales - (float) $row->cogs, 2),
+                'sales_with_tax' => (float) $row->gross_sales,
+                'sold_quantity' => (float) $row->sold_qty,
+                'returned_quantity' => 0,
+                'label' => $row->customer_name,
+                'value' => (float) $row->gross_sales,
+                'format' => 'currency',
+            ]);
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد مبيعات مجمعة حسب العملاء خلال الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'customer_name', 'label' => 'اسم العميل', 'format' => 'text'],
+            ['key' => 'customer_phone', 'label' => 'رقم هاتف العميل', 'format' => 'text'],
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'sales', 'label' => 'المبيعات', 'format' => 'currency'],
+            ['key' => 'cogs', 'label' => 'تكلفة البضاعة المباعة', 'format' => 'currency'],
+            ['key' => 'profit', 'label' => 'قيمة الربح', 'format' => 'currency'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شامل الضريبة)', 'format' => 'currency'],
+            ['key' => 'sold_quantity', 'label' => 'الكمية المباعة', 'format' => 'number'],
+            ['key' => 'returned_quantity', 'label' => 'الكمية المرتجعة', 'format' => 'number'],
+        ];
+
+        return $report;
+    }
+
+    private function transactionsByBranchInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoices as i')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->leftJoin('sales_channels as sc', 'sc.id', '=', 'i.sales_channel_id')
+            ->leftJoin('employees', 'employees.id', '=', 'i.employee_id')
+            ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->groupBy('i.id', 'b.name', 'b.code', 'i.invoice_number', 'i.invoice_date', 'i.total', 'sc.name', 'employees.first_name', 'employees.last_name')
+            ->orderByDesc('i.invoice_date')
+            ->selectRaw("COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, COALESCE(NULLIF(b.code, ''), '-') as branch_code, i.invoice_number, i.invoice_date, COALESCE(SUM(ii.quantity), 0) as qty_per_transaction, i.total as amount_paid_received, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as operation_cost, COALESCE(NULLIF(sc.name, ''), 'غير محدد') as sales_channel_name, employees.first_name, employees.last_name")
+            ->get()
+            ->map(function ($row) {
+                $employeeName = trim(implode(' ', array_filter([$row->first_name, $row->last_name])));
+
+                return [
+                    'location' => $row->branch_name,
+                    'location_code' => $row->branch_code,
+                    'transaction_reference' => $row->invoice_number,
+                    'transaction_type' => 'بيع',
+                    'transaction_date' => $row->invoice_date,
+                    'quantity_per_transaction' => (float) $row->qty_per_transaction,
+                    'paid_or_received_amount' => (float) $row->amount_paid_received,
+                    'operation_cost' => (float) $row->operation_cost,
+                    'sales_channel' => $row->sales_channel_name,
+                    'user_name' => $employeeName !== '' ? $employeeName : 'غير محدد',
+                    'label' => $row->invoice_number,
+                    'value' => (float) $row->amount_paid_received,
+                    'format' => 'currency',
+                ];
+            });
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد معاملات موزعة على المواقع خلال الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'location_code', 'label' => 'رمز الموقع', 'format' => 'text'],
+            ['key' => 'transaction_reference', 'label' => 'مرجع العملية', 'format' => 'text'],
+            ['key' => 'transaction_type', 'label' => 'نوع العملية', 'format' => 'text'],
+            ['key' => 'transaction_date', 'label' => 'تاريخ العملية', 'format' => 'date'],
+            ['key' => 'quantity_per_transaction', 'label' => 'الكمية لكل عملية', 'format' => 'number'],
+            ['key' => 'paid_or_received_amount', 'label' => 'المبلغ المدفوع/المستلم', 'format' => 'currency'],
+            ['key' => 'operation_cost', 'label' => 'تكلفة العملية', 'format' => 'currency'],
+            ['key' => 'sales_channel', 'label' => 'قناة البيع', 'format' => 'text'],
+            ['key' => 'user_name', 'label' => 'المستخدم', 'format' => 'text'],
+        ];
+
+        return $report;
+    }
+
+    private function customerProductSalesInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('sales_items as si')
+            ->join('sales as s', 's.id', '=', 'si.sale_id')
+            ->join('customers', 'customers.id', '=', 's.customer_id')
+            ->leftJoin('products', 'products.id', '=', 'si.product_id')
+            ->where('s.company_id', $company->id)
+            ->whereIn('s.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('s.sale_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->groupBy('customers.id', 'customers.name', 'products.id', 'products.name', 'si.description')
+            ->selectRaw("customers.name as customer_name, COALESCE(NULLIF(products.name, ''), si.description) as product_name, SUM(si.quantity) as sold_qty, SUM(si.total_amount) as total_sales")
+            ->orderByDesc('sold_qty')
+            ->get()
+            ->map(fn ($row) => ['label' => $row->customer_name . ' / ' . $row->product_name, 'meta' => 'إجمالي المبيعات: ' . number_format((float) $row->total_sales, 2), 'value' => (float) $row->sold_qty, 'format' => 'number']);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد منتجات مباعة للعملاء خلال الفترة المحددة.', 'number');
+    }
+
+    private function salesByPeriodInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoice_items as ii')
+            ->join('invoices as i', 'i.id', '=', 'ii.invoice_id')
+            ->leftJoin('products as p', 'p.id', '=', 'ii.product_id')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw("i.invoice_date, COALESCE(NULLIF(ii.description, ''), NULLIF(p.name, ''), 'غير محدد') as product_name, COALESCE(NULLIF(p.code, ''), '-') as product_number, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, COALESCE(SUM(ii.quantity), 0) as quantity, COALESCE(AVG(COALESCE(p.cost_price, 0)), 0) as unit_cost, COALESCE(SUM(ii.total - ii.tax_amount), 0) as net_sales, 0 as discount_amount, COALESCE(SUM(ii.tax_amount), 0) as sales_tax, COALESCE(SUM(ii.total), 0) as gross_sales, COALESCE(SUM(COALESCE(p.cost_price, 0) * ii.quantity), 0) as cogs")
+            ->groupBy('i.invoice_date', 'product_name', 'product_number', 'branch_name')
+            ->orderBy('i.invoice_date')
+            ->get()
+            ->map(fn ($row) => [
+                'transaction_date' => $row->invoice_date,
+                'product_name' => $row->product_name,
+                'product_number' => $row->product_number,
+                'location' => $row->branch_name,
+                'quantity' => (float) $row->quantity,
+                'unit_cost' => (float) $row->unit_cost,
+                'profit' => round((float) $row->net_sales - (float) $row->cogs, 2),
+                'sales' => (float) $row->net_sales,
+                'discount' => (float) $row->discount_amount,
+                'sales_tax' => (float) $row->sales_tax,
+                'sales_with_tax' => (float) $row->gross_sales,
+                'label' => $row->invoice_date,
+                'value' => (float) $row->gross_sales,
+                'format' => 'currency',
+            ]);
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد مبيعات ضمن الفترة الزمنية المحددة.');
+        $report['columns'] = [
+            ['key' => 'transaction_date', 'label' => 'تاريخ العملية', 'format' => 'date'],
+            ['key' => 'product_name', 'label' => 'اسم المنتج/الرقم التعريفي', 'format' => 'text'],
+            ['key' => 'product_number', 'label' => 'رقم المنتج', 'format' => 'text'],
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'quantity', 'label' => 'الكمية', 'format' => 'number'],
+            ['key' => 'unit_cost', 'label' => 'التكلفة لكل وحدة', 'format' => 'currency'],
+            ['key' => 'profit', 'label' => 'قيمة الربح', 'format' => 'currency'],
+            ['key' => 'sales', 'label' => 'المبيعات', 'format' => 'currency'],
+            ['key' => 'discount', 'label' => 'الخصم', 'format' => 'currency'],
+            ['key' => 'sales_tax', 'label' => 'ضريبة المبيعات', 'format' => 'currency'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شامل الضريبة)', 'format' => 'currency'],
+        ];
+
+        return $report;
+    }
+
+    private function salesByPaymentMethodInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoices as i')
+            ->leftJoin('payment_methods as pm', 'pm.id', '=', 'i.payment_method_id')
+            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
+            ->leftJoin('employees', 'employees.id', '=', 'i.employee_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw("COALESCE(NULLIF(pm.name, ''), 'غير محدد') as payment_method_name, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, employees.first_name, employees.last_name, COUNT(i.id) as sale_operations, COALESCE(SUM(i.total), 0) as gross_sales")
+            ->groupBy('payment_method_name', 'branch_name', 'employees.id', 'employees.first_name', 'employees.last_name')
+            ->orderByDesc('gross_sales')
+            ->get()
+            ->map(function ($row) {
+                $employeeName = trim(implode(' ', array_filter([$row->first_name, $row->last_name])));
+
+                return [
+                    'payment_method' => $row->payment_method_name,
+                    'location' => $row->branch_name,
+                    'employee' => $employeeName !== '' ? $employeeName : 'غير محدد',
+                    'sale_operations' => (int) $row->sale_operations,
+                    'gross_sales_total' => (float) $row->gross_sales,
+                    'return_operations' => 0,
+                    'gross_returns_total' => 0,
+                    'total_operations' => (int) $row->sale_operations,
+                    'sales_with_tax' => (float) $row->gross_sales,
+                    'label' => $row->payment_method_name,
+                    'value' => (float) $row->gross_sales,
+                    'format' => 'currency',
+                ];
+            });
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد مبيعات مرتبطة بطرق دفع ضمن الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'payment_method', 'label' => 'طريقة الدفع', 'format' => 'text'],
+            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
+            ['key' => 'employee', 'label' => 'الموظف', 'format' => 'text'],
+            ['key' => 'sale_operations', 'label' => 'عدد عمليات البيع', 'format' => 'number'],
+            ['key' => 'gross_sales_total', 'label' => 'إجمالي المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'return_operations', 'label' => 'عدد عمليات الإرجاع', 'format' => 'number'],
+            ['key' => 'gross_returns_total', 'label' => 'إجمالي المرتجعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'total_operations', 'label' => 'إجمالي العمليات', 'format' => 'number'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+        ];
+
+        return $report;
+    }
+
+    private function customerStatementInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $agingDate = $dateTo->copy()->endOfDay();
+
+        $rows = DB::table('invoices as i')
+            ->join('customers', 'customers.id', '=', 'i.customer_id')
+            ->where('i.company_id', $company->id)
+            ->whereIn('i.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->orderBy('customers.name')
+            ->get(['customers.name as customer_name', 'customers.tax_number', 'i.total', 'i.paid_amount', 'i.balance_due', 'i.due_date', 'i.invoice_date'])
+            ->groupBy('customer_name')
+            ->map(function ($customerInvoices, $customerName) use ($agingDate) {
+                $firstInvoice = $customerInvoices->first();
+                $bucket_1_15 = 0.0;
+                $bucket_16_31 = 0.0;
+                $bucket_31_60 = 0.0;
+                $bucket_61_90 = 0.0;
+                $bucket_over_90 = 0.0;
+
+                foreach ($customerInvoices as $invoice) {
+                    $balance = (float) $invoice->balance_due;
+                    if ($balance <= 0) {
+                        continue;
+                    }
+
+                    $referenceDate = $invoice->due_date ?: $invoice->invoice_date;
+                    $ageInDays = Carbon::parse($referenceDate)->diffInDays($agingDate, false);
+
+                    if ($ageInDays >= 1 && $ageInDays <= 15) {
+                        $bucket_1_15 += $balance;
+                    } elseif ($ageInDays >= 16 && $ageInDays <= 31) {
+                        $bucket_16_31 += $balance;
+                    } elseif ($ageInDays >= 32 && $ageInDays <= 60) {
+                        $bucket_31_60 += $balance;
+                    } elseif ($ageInDays >= 61 && $ageInDays <= 90) {
+                        $bucket_61_90 += $balance;
+                    } elseif ($ageInDays > 90) {
+                        $bucket_over_90 += $balance;
+                    }
+                }
+
+                return [
+                    'customer_name' => $customerName,
+                    'customer_tax_number' => $firstInvoice->tax_number ?? '',
+                    'sales_with_tax' => round((float) $customerInvoices->sum('total'), 2),
+                    'paid_amount' => round((float) $customerInvoices->sum('paid_amount'), 2),
+                    'outstanding_amount' => round((float) $customerInvoices->sum('balance_due'), 2),
+                    'bucket_1_15' => round($bucket_1_15, 2),
+                    'bucket_16_31' => round($bucket_16_31, 2),
+                    'bucket_31_60' => round($bucket_31_60, 2),
+                    'bucket_61_90' => round($bucket_61_90, 2),
+                    'bucket_over_90' => round($bucket_over_90, 2),
+                    'label' => $customerName,
+                    'value' => round((float) $customerInvoices->sum('balance_due'), 2),
+                    'format' => 'currency',
+                ];
+            })
+            ->filter(fn ($row) => $row['sales_with_tax'] > 0 || $row['outstanding_amount'] > 0)
+            ->sortByDesc('outstanding_amount')
+            ->values();
+
+        $report = $this->interactiveCollectionReport($rows, 'لا توجد بيانات كافية لإظهار كشف حساب المدين خلال الفترة المحددة.');
+        $report['columns'] = [
+            ['key' => 'customer_name', 'label' => 'اسم العميل', 'format' => 'text'],
+            ['key' => 'customer_tax_number', 'label' => 'الرقم الضريبي للعميل', 'format' => 'text'],
+            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شاملة الضريبة)', 'format' => 'currency'],
+            ['key' => 'paid_amount', 'label' => 'المبلغ المدفوع', 'format' => 'currency'],
+            ['key' => 'outstanding_amount', 'label' => 'المبلغ المستحق', 'format' => 'currency'],
+            ['key' => 'bucket_1_15', 'label' => 'المبلغ المستحق خلال 1 - 15 يوم', 'format' => 'currency'],
+            ['key' => 'bucket_16_31', 'label' => 'المبلغ المستحق خلال 16 - 31 يوم', 'format' => 'currency'],
+            ['key' => 'bucket_31_60', 'label' => 'المبلغ المستحق خلال 31 - 60 يوم', 'format' => 'currency'],
+            ['key' => 'bucket_61_90', 'label' => 'المبلغ المستحق خلال 61 - 90 يوم', 'format' => 'currency'],
+            ['key' => 'bucket_over_90', 'label' => 'المبلغ المستحق لأكثر من 90 يوم', 'format' => 'currency'],
+        ];
+
+        return $report;
+    }
+
+    private function inventorySnapshotInteractiveReport(Company $company): array
+    {
+        $rows = Product::forCompany($company->id)
+            ->orderByDesc(DB::raw('stock_quantity * cost_price'))
+            ->get()
+            ->map(fn (Product $product) => ['label' => $product->name, 'meta' => sprintf('المخزون: %s | التكلفة: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->cost_price, 2)), 'value' => round((float) $product->stock_quantity * (float) $product->cost_price, 2)]);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد منتجات لعرض لقطة المخزون الحالية.');
+    }
+
+    private function lowStockAlertsInteractiveReport(Company $company): array
+    {
+        $rows = Product::forCompany($company->id)
+            ->whereColumn('stock_quantity', '<=', 'min_stock')
+            ->orderBy('stock_quantity')
+            ->get()
+            ->map(fn (Product $product) => ['label' => $product->name, 'meta' => sprintf('الرصيد الحالي: %s | الحد الأدنى: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->min_stock, 2)), 'value' => max((float) $product->min_stock - (float) $product->stock_quantity, 0)]);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد منتجات منخفضة المخزون حالياً.');
+    }
+
+    private function salesVelocityInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('invoice_items')
+            ->join('invoices', 'invoices.id', '=', 'invoice_items.invoice_id')
+            ->leftJoin('products', 'products.id', '=', 'invoice_items.product_id')
+            ->where('invoices.company_id', $company->id)
+            ->whereIn('invoices.status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoices.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw("COALESCE(products.name, invoice_items.description) as label, SUM(invoice_items.quantity) as sold_qty, SUM(invoice_items.total) as total_sales")
+            ->groupBy('label')
+            ->orderByDesc('sold_qty')
+            ->get()
+            ->map(fn ($row) => ['label' => $row->label, 'meta' => 'إجمالي المبيعات: ' . number_format((float) $row->total_sales, 2), 'value' => (float) $row->sold_qty]);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد حركة مبيعات كافية لحساب سرعة الدوران.');
+    }
+
+    private function taxOutputByInvoiceInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = Invoice::query()
+            ->where('company_id', $company->id)
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->where('tax_amount', '>', 0)
+            ->orderByDesc('invoice_date')
+            ->get(['invoice_number', 'invoice_date', 'tax_amount', 'total'])
+            ->map(fn (Invoice $invoice) => ['label' => $invoice->invoice_number, 'meta' => sprintf('التاريخ: %s | إجمالي الفاتورة: %s', optional($invoice->invoice_date)->format('Y-m-d'), number_format((float) $invoice->total, 2)), 'value' => (float) $invoice->tax_amount]);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد ضرائب مبيعات ضمن الفترة المحددة.');
+    }
+
+    private function taxInputBySupplierInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = Purchase::query()
+            ->join('suppliers', 'suppliers.id', '=', 'purchases.supplier_id')
+            ->where('purchases.company_id', $company->id)
+            ->whereBetween('purchases.purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->groupBy('suppliers.id', 'suppliers.name')
+            ->selectRaw('suppliers.name as label, COUNT(purchases.id) as purchase_count, SUM(purchases.tax_amount) as tax_total')
+            ->orderByDesc('tax_total')
+            ->get()
+            ->map(fn ($row) => ['label' => $row->label, 'meta' => 'عدد المشتريات: ' . $row->purchase_count, 'value' => (float) $row->tax_total]);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد ضرائب مشتريات مجمعة حسب المورد خلال الفترة المحددة.');
+    }
+
+    private function warehouseCoverageInteractiveReport(Company $company): array
+    {
+        $rows = Product::forCompany($company->id)
+            ->orderByRaw('(stock_quantity - min_stock) asc')
+            ->get()
+            ->map(fn (Product $product) => ['label' => $product->name, 'meta' => sprintf('المخزون: %s | الحد الأدنى: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->min_stock, 2)), 'value' => round((float) $product->stock_quantity - (float) $product->min_stock, 2)]);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد بيانات كافية عن تغطية المخزون.');
+    }
+
+    private function warehouseIncomingInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = DB::table('purchase_items')
+            ->join('purchases', 'purchases.id', '=', 'purchase_items.purchase_id')
+            ->leftJoin('products', 'products.id', '=', 'purchase_items.product_id')
+            ->where('purchases.company_id', $company->id)
+            ->whereBetween('purchases.purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->selectRaw("COALESCE(products.name, purchase_items.description) as label, SUM(purchase_items.quantity) as incoming_qty, SUM(purchase_items.total) as total_value")
+            ->groupBy('label')
+            ->orderByDesc('incoming_qty')
+            ->get()
+            ->map(fn ($row) => ['label' => $row->label, 'meta' => 'قيمة الوارد: ' . number_format((float) $row->total_value, 2), 'value' => (float) $row->incoming_qty]);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد حركات وارد من المشتريات ضمن الفترة المحددة.');
+    }
+
+    private function warehouseSuppliersInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        $rows = Purchase::query()
+            ->join('suppliers', 'suppliers.id', '=', 'purchases.supplier_id')
+            ->where('purchases.company_id', $company->id)
+            ->whereBetween('purchases.purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->groupBy('suppliers.id', 'suppliers.name')
+            ->selectRaw('suppliers.name as label, COUNT(purchases.id) as purchase_count, SUM(purchases.total) as total_received')
+            ->orderByDesc('total_received')
+            ->get()
+            ->map(fn ($row) => ['label' => $row->label, 'meta' => 'عدد أوامر الشراء: ' . $row->purchase_count, 'value' => (float) $row->total_received]);
+
+        return $this->interactiveCollectionReport($rows, 'لا توجد استلامات موردين ضمن الفترة المحددة.');
+    }
+
+    private function interactiveCollectionReport(Collection $rows, string $emptyMessage, string $valueFormat = 'currency'): array
+    {
+        return [
+            'supported' => true,
+            'rows' => $rows,
+            'chart' => [
+                'type' => 'bar',
+                'labels' => $rows->pluck('label')->take(8)->values(),
+                'values' => $rows->pluck('value')->map(fn ($value) => round((float) $value, 2))->take(8)->values(),
+            ],
+            'highlights' => [
+                ['label' => 'عدد النتائج', 'value' => $rows->count(), 'format' => 'number'],
+                ['label' => 'الإجمالي', 'value' => (float) $rows->sum('value'), 'format' => $valueFormat],
+                ['label' => 'أعلى نتيجة', 'value' => $rows->isNotEmpty() ? (float) $rows->max('value') : 0, 'format' => $valueFormat],
+            ],
+            'value_format' => $valueFormat,
+            'columns' => [
+                ['key' => 'label', 'label' => 'البند'],
+                ['key' => 'meta', 'label' => 'التفاصيل'],
+                ['key' => 'value', 'label' => 'القيمة', 'format' => $valueFormat],
+            ],
+            'empty_message' => $emptyMessage,
+            'insight' => $rows->isNotEmpty() ? 'الأداء الأعلى حالياً: ' . $rows->first()['label'] : $emptyMessage,
+        ];
     }
 
     public function hr(Request $request): View
@@ -1627,10 +2759,26 @@ class AccountingPageController extends Controller
 
     private function validateInvoiceData(Request $request, int $companyId): array
     {
-        return $request->validate([
+        $validated = $request->validate([
             'customer_id' => [
                 'required',
                 Rule::exists('customers', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+            ],
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+            ],
+            'employee_id' => [
+                'nullable',
+                Rule::exists('employees', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+            ],
+            'sales_channel_id' => [
+                'nullable',
+                Rule::exists('sales_channels', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+            ],
+            'payment_method_id' => [
+                'nullable',
+                Rule::exists('payment_methods', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
             ],
             'invoice_date' => ['required', 'date'],
             'due_date' => ['nullable', 'date', 'after_or_equal:invoice_date'],
@@ -1651,6 +2799,30 @@ class AccountingPageController extends Controller
             'item_tax_rate' => ['nullable', 'array'],
             'item_tax_rate.*' => ['nullable', 'numeric', 'min:0', 'max:100'],
         ]);
+
+        $validated['branch_id'] = $validated['branch_id'] ?? $this->defaultBranchId($companyId);
+        $validated['sales_channel_id'] = $validated['sales_channel_id'] ?? $this->defaultSalesChannelId($companyId);
+        $validated['payment_method_id'] = $validated['payment_method_id'] ?? $this->defaultPaymentMethodId($companyId);
+
+        $missingDefaults = [];
+
+        if (! $validated['branch_id']) {
+            $missingDefaults['branch_id'] = 'لا يوجد فرع متاح لحفظ عملية البيع. أضف فرعاً أولاً.';
+        }
+
+        if (! $validated['sales_channel_id']) {
+            $missingDefaults['sales_channel_id'] = 'لا توجد قناة بيع متاحة لحفظ عملية البيع. أضف قناة بيع أولاً.';
+        }
+
+        if (! $validated['payment_method_id']) {
+            $missingDefaults['payment_method_id'] = 'لا توجد طريقة دفع متاحة لحفظ عملية البيع. أضف طريقة دفع أولاً.';
+        }
+
+        if ($missingDefaults !== []) {
+            throw ValidationException::withMessages($missingDefaults);
+        }
+
+        return $validated;
     }
 
     private function validateJournalEntryData(Request $request, int $companyId): array
@@ -2022,6 +3194,7 @@ class AccountingPageController extends Controller
         return [
             'company_id' => $companyId,
             'supplier_id' => $validated['supplier_id'] ?? null,
+            'category_id' => $this->categoryIdForProductType($companyId, (string) $validated['type']),
             'name' => $validated['name'],
             'name_ar' => $validated['name_ar'] ?? null,
             'code' => $validated['code'] ?? null,
@@ -2037,10 +3210,18 @@ class AccountingPageController extends Controller
         ];
     }
 
-    private function validatePurchaseData(Request $request, int $companyId): array
+    private function validatePurchaseData(Request $request, int $companyId, ?Purchase $purchase = null): array
     {
+        $attachmentRules = [
+            $purchase ? 'nullable' : 'required',
+            'file',
+            'mimes:jpg,jpeg,png,pdf',
+            'max:8192',
+        ];
+
         $validated = $request->validate([
             'purchase_modal' => ['nullable', 'string'],
+            'supplier_invoice_number' => ['nullable', 'string', 'max:100'],
             'supplier_id' => [
                 'required',
                 Rule::exists('suppliers', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
@@ -2048,7 +3229,11 @@ class AccountingPageController extends Controller
             'purchase_date' => ['required', 'date'],
             'due_date' => ['nullable', 'date', 'after_or_equal:purchase_date'],
             'status' => ['nullable', Rule::in(['draft', 'pending', 'approved'])],
+            'payment_status' => ['required', Rule::in(['pending', 'partial', 'paid'])],
+            'payment_method' => ['nullable', 'string', 'max:50'],
+            'payment_date' => ['nullable', 'date', 'after_or_equal:purchase_date'],
             'notes' => ['nullable', 'string'],
+            'attachment' => $attachmentRules,
             'item_product_id' => ['required', 'array', 'min:1'],
             'item_product_id.*' => [
                 'nullable',
@@ -2065,6 +3250,130 @@ class AccountingPageController extends Controller
         ]);
 
         return $validated;
+    }
+
+    private function defaultBranchId(int $companyId): ?int
+    {
+        $branchId = Branch::query()
+            ->where('company_id', $companyId)
+            ->orderByDesc('is_default')
+            ->orderBy('id')
+            ->value('id');
+
+        if ($branchId) {
+            return (int) $branchId;
+        }
+
+        return (int) Branch::query()->create([
+            'company_id' => $companyId,
+            'name' => 'الفرع الرئيسي',
+            'code' => 'MAIN',
+            'city' => Company::query()->whereKey($companyId)->value('city'),
+            'is_default' => true,
+        ])->id;
+    }
+
+    private function defaultSalesChannelId(int $companyId): ?int
+    {
+        $channelId = SalesChannel::query()
+            ->where('company_id', $companyId)
+            ->orderByDesc('is_default')
+            ->orderBy('id')
+            ->value('id');
+
+        if ($channelId) {
+            return (int) $channelId;
+        }
+
+        return (int) SalesChannel::query()->create([
+            'company_id' => $companyId,
+            'name' => 'المبيعات المباشرة',
+            'code' => 'DIRECT',
+            'is_default' => true,
+        ])->id;
+    }
+
+    private function defaultPaymentMethodId(int $companyId): ?int
+    {
+        $paymentMethodId = PaymentMethod::query()
+            ->where('company_id', $companyId)
+            ->orderByDesc('is_default')
+            ->orderBy('id')
+            ->value('id');
+
+        if ($paymentMethodId) {
+            return (int) $paymentMethodId;
+        }
+
+        return (int) PaymentMethod::query()->create([
+            'company_id' => $companyId,
+            'name' => 'غير محدد',
+            'code' => 'UNSPECIFIED',
+            'type' => 'other',
+            'is_default' => true,
+        ])->id;
+    }
+
+    private function categoryIdForProductType(int $companyId, string $type): ?int
+    {
+        $normalizedType = trim($type);
+
+        $categoryName = match (strtolower($normalizedType)) {
+            'product' => 'منتجات',
+            'service' => 'خدمات',
+            default => $normalizedType !== '' ? $normalizedType : 'غير مصنف',
+        };
+
+        return Category::query()
+            ->where('company_id', $companyId)
+            ->where('name', $categoryName)
+            ->value('id')
+            ?: Category::query()
+                ->where('company_id', $companyId)
+                ->orderByDesc('is_default')
+                ->orderBy('id')
+                ->value('id');
+    }
+
+    private function resolveInvoiceItemCategoryId(int $companyId, $productId): ?int
+    {
+        $resolvedProductId = (int) ($productId ?: 0);
+
+        if ($resolvedProductId > 0) {
+            $categoryId = Product::query()
+                ->where('company_id', $companyId)
+                ->where('id', $resolvedProductId)
+                ->value('category_id');
+
+            if ($categoryId) {
+                return (int) $categoryId;
+            }
+        }
+
+        return Category::query()
+            ->where('company_id', $companyId)
+            ->orderByDesc('is_default')
+            ->orderBy('id')
+            ->value('id');
+    }
+
+    private function handlePurchaseAttachmentUpload(Request $request, ?Purchase $purchase = null): ?string
+    {
+        if (! $request->hasFile('attachment')) {
+            return $purchase?->attachment_path;
+        }
+
+        $file = $request->file('attachment');
+
+        if (! $file || ! $file->isValid()) {
+            return $purchase?->attachment_path;
+        }
+
+        if ($purchase && $purchase->attachment_path) {
+            Storage::disk('public')->delete($purchase->attachment_path);
+        }
+
+        return $file->store('purchase_attachments', 'public');
     }
 
     private function purchasePaymentStatus(float $paidAmount, float $total): string
@@ -2153,6 +3462,250 @@ class AccountingPageController extends Controller
         throw new ValidationException($validator);
     }
 
+    private function shouldConsumeInvoiceStock(string $status): bool
+    {
+        return $status !== 'draft';
+    }
+
+    private function invoicePaymentStatus(float $paidAmount, float $total): string
+    {
+        if ($paidAmount >= $total && $total > 0) {
+            return 'paid';
+        }
+
+        if ($paidAmount > 0) {
+            return 'partial';
+        }
+
+        return 'pending';
+    }
+
+    private function invoiceStockRequirementsFromValidated(array $validated): array
+    {
+        $requirements = [];
+
+        foreach ($validated['item_product_id'] as $index => $productId) {
+            $productId = (int) ($productId ?: 0);
+
+            if ($productId <= 0) {
+                continue;
+            }
+
+            $quantity = round((float) ($validated['item_quantity'][$index] ?? 0), 2);
+
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            if (! isset($requirements[$productId])) {
+                $requirements[$productId] = [
+                    'requested' => 0.0,
+                    'line_indexes' => [],
+                ];
+            }
+
+            $requirements[$productId]['requested'] += $quantity;
+            $requirements[$productId]['line_indexes'][] = $index;
+        }
+
+        return $requirements;
+    }
+
+    private function invoiceStockRequirementsFromItems(Collection $items): array
+    {
+        $requirements = [];
+
+        foreach ($items as $index => $item) {
+            $productId = (int) ($item->product_id ?: 0);
+
+            if ($productId <= 0) {
+                continue;
+            }
+
+            $quantity = round((float) $item->quantity, 2);
+
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            if (! isset($requirements[$productId])) {
+                $requirements[$productId] = [
+                    'requested' => 0.0,
+                    'line_indexes' => [],
+                ];
+            }
+
+            $requirements[$productId]['requested'] += $quantity;
+            $requirements[$productId]['line_indexes'][] = (int) $index;
+        }
+
+        return $requirements;
+    }
+
+    private function ensureInvoiceStockAvailability(int $companyId, array $requirements): void
+    {
+        if ($requirements === []) {
+            return;
+        }
+
+        $productIds = array_keys($requirements);
+        $products = Product::query()
+            ->where('company_id', $companyId)
+            ->whereIn('id', $productIds)
+            ->get()
+            ->keyBy('id');
+
+        $validator = Validator::make([], []);
+
+        foreach ($requirements as $productId => $requirement) {
+            /** @var Product|null $product */
+            $product = $products->get($productId);
+
+            if (! $product || $product->type === 'service') {
+                continue;
+            }
+
+            $availableQuantity = round((float) $product->stock_quantity, 2);
+            $requestedQuantity = round((float) $requirement['requested'], 2);
+
+            if ($requestedQuantity <= $availableQuantity) {
+                continue;
+            }
+
+            $message = $availableQuantity > 0
+                ? sprintf(
+                    'الكمية المتاحة للمنتج "%s" هي %s فقط، بينما إجمالي الكمية المطلوبة %s.',
+                    $product->name,
+                    number_format($availableQuantity, 2),
+                    number_format($requestedQuantity, 2)
+                )
+                : sprintf('المنتج "%s" نفدت كميته الحالية ولا يمكن إضافته إلى الفاتورة.', $product->name);
+
+            foreach ($requirement['line_indexes'] as $lineIndex) {
+                $validator->errors()->add('item_quantity.' . $lineIndex, $message);
+            }
+        }
+
+        if ($validator->errors()->isNotEmpty()) {
+            throw new ValidationException($validator);
+        }
+    }
+
+    private function consumeInvoiceStock(int $companyId, array $requirements): void
+    {
+        if ($requirements === []) {
+            return;
+        }
+
+        $productIds = array_keys($requirements);
+        $products = Product::query()
+            ->where('company_id', $companyId)
+            ->whereIn('id', $productIds)
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
+
+        $validator = Validator::make([], []);
+
+        foreach ($requirements as $productId => $requirement) {
+            /** @var Product|null $product */
+            $product = $products->get($productId);
+
+            if (! $product || $product->type === 'service') {
+                continue;
+            }
+
+            $availableQuantity = round((float) $product->stock_quantity, 2);
+            $requestedQuantity = round((float) $requirement['requested'], 2);
+
+            if ($requestedQuantity > $availableQuantity) {
+                $message = $availableQuantity > 0
+                    ? sprintf(
+                        'الكمية المتاحة للمنتج "%s" هي %s فقط، بينما إجمالي الكمية المطلوبة %s.',
+                        $product->name,
+                        number_format($availableQuantity, 2),
+                        number_format($requestedQuantity, 2)
+                    )
+                    : sprintf('المنتج "%s" نفدت كميته الحالية ولا يمكن إضافته إلى الفاتورة.', $product->name);
+
+                foreach ($requirement['line_indexes'] as $lineIndex) {
+                    $validator->errors()->add('item_quantity.' . $lineIndex, $message);
+                }
+
+                continue;
+            }
+
+            $product->update([
+                'stock_quantity' => round($availableQuantity - $requestedQuantity, 2),
+            ]);
+        }
+
+        if ($validator->errors()->isNotEmpty()) {
+            throw new ValidationException($validator);
+        }
+    }
+
+    private function restoreInvoiceStock(int $companyId, array $requirements): void
+    {
+        if ($requirements === []) {
+            return;
+        }
+
+        $productIds = array_keys($requirements);
+        $products = Product::query()
+            ->where('company_id', $companyId)
+            ->whereIn('id', $productIds)
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
+
+        foreach ($requirements as $productId => $requirement) {
+            /** @var Product|null $product */
+            $product = $products->get($productId);
+
+            if (! $product || $product->type === 'service') {
+                continue;
+            }
+
+            $product->update([
+                'stock_quantity' => round((float) $product->stock_quantity + round((float) $requirement['requested'], 2), 2),
+            ]);
+        }
+    }
+
+    private function invoiceFormView(Company $company, ?Invoice $invoice = null): View
+    {
+        $customers = Customer::where('company_id', $company->id)->orderBy('name')->get();
+        $products = Product::forCompany($company->id)->active()->orderBy('name')->get();
+        $branches = Branch::query()->where('company_id', $company->id)->orderByDesc('is_default')->orderBy('name')->get();
+        $employees = Employee::query()->forCompany($company->id)->active()->orderBy('first_name')->orderBy('last_name')->get();
+        $salesChannels = SalesChannel::query()->where('company_id', $company->id)->orderByDesc('is_default')->orderBy('name')->get();
+        $paymentMethods = PaymentMethod::query()->where('company_id', $company->id)->orderByDesc('is_default')->orderBy('name')->get();
+        $defaultTaxRate = 15;
+        $defaultBranchId = $this->defaultBranchId($company->id);
+        $defaultSalesChannelId = $this->defaultSalesChannelId($company->id);
+        $defaultPaymentMethodId = $this->defaultPaymentMethodId($company->id);
+
+        if ($invoice) {
+            $invoice->loadMissing('items');
+        }
+
+        return view('invoice_form', compact(
+            'company',
+            'customers',
+            'products',
+            'branches',
+            'employees',
+            'salesChannels',
+            'paymentMethods',
+            'defaultTaxRate',
+            'defaultBranchId',
+            'defaultSalesChannelId',
+            'defaultPaymentMethodId',
+            'invoice'
+        ));
+    }
+
     private function syncInvoiceItems(Invoice $invoice, array $validated): void
     {
         $invoice->items()->delete();
@@ -2166,6 +3719,7 @@ class AccountingPageController extends Controller
 
             $invoice->items()->create([
                 'product_id' => $validated['item_product_id'][$index] ?: null,
+                'category_id' => $this->resolveInvoiceItemCategoryId((int) $invoice->company_id, $validated['item_product_id'][$index] ?? null),
                 'description' => $description,
                 'quantity' => $quantity,
                 'unit_price' => $unitPrice,

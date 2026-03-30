@@ -9,7 +9,6 @@
     $selectedOutputTaxAccount = (int) old('output_tax_account_id', $outputTaxSetting?->account_id);
     $selectedInputTaxAccount = (int) old('input_tax_account_id', $inputTaxSetting?->account_id);
     $taxReportUrl = route('reports', ['report_type' => 'tax_summary']);
-    $taxReportPrintUrl = route('reports', ['report_type' => 'tax_summary', 'print' => 1]);
 @endphp
 
 @section('content')
@@ -123,11 +122,8 @@
                                     <p class="text-muted mb-0">اربط حساب ضريبة المخرجات وضريبة المدخلات المستخدمة في القيود الآلية والتقارير الضريبية.</p>
                                 </div>
                                 <div class="d-flex gap-2 flex-wrap">
-                                    <a href="{{ $taxReportUrl }}" target="_blank" class="btn btn-outline-primary">
+                                    <a href="{{ $taxReportUrl }}" class="btn btn-outline-primary">
                                         <i class="fas fa-chart-pie ms-1"></i> إنشاء تقرير الضرائب
-                                    </a>
-                                    <a href="{{ $taxReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
-                                        <i class="fas fa-print ms-1"></i> طباعة / PDF
                                     </a>
                                 </div>
                             </div>

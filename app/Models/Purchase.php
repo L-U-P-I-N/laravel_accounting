@@ -13,6 +13,8 @@ class Purchase extends Model
 
     protected $fillable = [
         'purchase_number',
+        'supplier_invoice_number',
+        'attachment_path',
         'supplier_id',
         'company_id',
         'purchase_date',
@@ -24,6 +26,8 @@ class Purchase extends Model
         'balance_due',
         'status',
         'payment_status',
+        'payment_method',
+        'payment_date',
         'notes',
         'terms',
         'currency',
@@ -33,6 +37,7 @@ class Purchase extends Model
     protected $casts = [
         'purchase_date' => 'date',
         'due_date' => 'date',
+        'payment_date' => 'date',
         'subtotal' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'total' => 'decimal:2',

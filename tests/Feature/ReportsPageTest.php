@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\AccountingPageController;
 use App\Models\Account;
+use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Expense;
@@ -121,6 +122,7 @@ class ReportsPageTest extends TestCase
         view()->share('errors', new ViewErrorBag());
 
         $request = Request::create('/reports', 'GET', [
+            'print' => 1,
             'report_type' => 'product_sales',
             'period' => 'custom',
             'date_from' => '2026-03-01',
@@ -238,6 +240,7 @@ class ReportsPageTest extends TestCase
         view()->share('errors', new ViewErrorBag());
 
         $request = Request::create('/reports', 'GET', [
+            'print' => 1,
             'report_type' => 'tax_summary',
             'period' => 'custom',
             'date_from' => '2026-03-01',
@@ -254,5 +257,112 @@ class ReportsPageTest extends TestCase
         $this->assertSame(15.0, (float) $data['report']['highlights'][0]['value']);
         $this->assertSame(15.0, (float) $data['report']['highlights'][1]['value']);
         $this->assertSame(0.0, (float) $data['report']['highlights'][2]['value']);
+    }
+
+    public function test_interactive_report_print_uses_same_payload_as_screen_view(): void
+    {
+        $company = Company::create([
+            'name' => 'Print Match Co',
+            'country_code' => 'SA',
+            'currency' => 'SAR',
+        ]);
+
+        $user = User::factory()->create([
+            'first_name' => 'Owner',
+            'last_name' => 'Print',
+            'name' => 'Owner Print',
+            'role' => 'owner',
+            'company_id' => $company->id,
+            'must_change_password' => false,
+            'is_active' => true,
+        ]);
+
+        $branch = Branch::create([
+            'company_id' => $company->id,
+            'name' => 'فرع الرياض',
+            'code' => 'RUH-01',
+            'is_default' => true,
+        ]);
+
+        $customer = Customer::create([
+            'company_id' => $company->id,
+            'name' => 'Customer Print',
+            'is_active' => true,
+        ]);
+
+        $product = Product::create([
+            'company_id' => $company->id,
+            'name' => 'Desk Pro',
+            'name_ar' => 'Desk Pro',
+            'code' => 'DP-1',
+            'type' => 'product',
+            'unit' => 'piece',
+            'cost_price' => 200,
+            'sell_price' => 500,
+            'stock_quantity' => 10,
+            'min_stock' => 1,
+            'tax_rate' => 15,
+            'is_active' => true,
+        ]);
+
+        $invoice = Invoice::create([
+            'invoice_number' => 'INV-PRINT-1',
+            'customer_id' => $customer->id,
+            'company_id' => $company->id,
+            'branch_id' => $branch->id,
+            'invoice_date' => '2026-03-20',
+            'due_date' => '2026-03-25',
+            'subtotal' => 1000,
+            'tax_amount' => 150,
+            'total' => 1150,
+            'paid_amount' => 0,
+            'balance_due' => 1150,
+            'status' => 'sent',
+            'payment_status' => 'pending',
+            'currency' => 'SAR',
+            'exchange_rate' => 1,
+        ]);
+
+        InvoiceItem::create([
+            'invoice_id' => $invoice->id,
+            'product_id' => $product->id,
+            'description' => 'Desk Pro',
+            'quantity' => 2,
+            'unit_price' => 500,
+            'tax_rate' => 15,
+            'tax_amount' => 150,
+            'total' => 1150,
+        ]);
+
+        $this->actingAs($user);
+        view()->share('errors', new ViewErrorBag());
+
+        $screenRequest = Request::create('/reports/view/sales_by_location', 'GET', [
+            'period' => 'custom',
+            'date_from' => '2026-03-01',
+            'date_to' => '2026-03-31',
+        ]);
+        $screenRequest->setUserResolver(fn () => $user);
+
+        $printRequest = Request::create('/reports/view/sales_by_location', 'GET', [
+            'period' => 'custom',
+            'date_from' => '2026-03-01',
+            'date_to' => '2026-03-31',
+            'print' => 1,
+        ]);
+        $printRequest->setUserResolver(fn () => $user);
+
+        $controller = app(AccountingPageController::class);
+        $screenView = $controller->reportShow($screenRequest, 'sales_by_location');
+        $printView = $controller->reportShow($printRequest, 'sales_by_location');
+
+        $screenData = $screenView->getData();
+        $printData = $printView->getData();
+
+        $this->assertSame('reports_show', $screenView->name());
+        $this->assertSame('reports_show_print', $printView->name());
+        $this->assertSame($screenData['reportPayload']['columns'], $printData['reportPayload']['columns']);
+        $this->assertSame($screenData['reportPayload']['rows']->toArray(), $printData['reportPayload']['rows']->toArray());
+        $this->assertSame('فرع الرياض', $printData['reportPayload']['rows']->first()['location']);
     }
 }

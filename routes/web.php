@@ -27,15 +27,17 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
     Route::middleware('permission:manage_invoices')->group(function () {
         Route::get('/invoices', [AccountingPageController::class, 'invoices'])->name('invoices');
         Route::get('/invoices/create', [AccountingPageController::class, 'invoiceCreate'])->name('invoices.create');
+        Route::get('/invoices/{invoice}/edit', [AccountingPageController::class, 'invoiceEdit'])->name('invoices.edit');
         Route::post('/invoices', [AccountingPageController::class, 'storeInvoice'])->name('invoices.store');
+        Route::put('/invoices/{invoice}', [AccountingPageController::class, 'updateInvoice'])->name('invoices.update');
+        Route::delete('/invoices/{invoice}', [AccountingPageController::class, 'destroyInvoice'])->name('invoices.destroy');
         Route::patch('/invoices/{invoice}/send', [AccountingPageController::class, 'sendInvoice'])->name('invoices.send');
         Route::get('/invoices/{invoice}', [AccountingPageController::class, 'invoiceShow'])->name('invoices.show');
-        Route::get('/invoices/{invoice}/pdf-preview', [AccountingPageController::class, 'invoicePdf'])->name('invoices.pdf');
     });
 
     Route::middleware('permission:manage_purchases')->group(function () {
         Route::get('/purchases', [AccountingPageController::class, 'purchases'])->name('purchases');
-        Route::get('/purchases/{purchase}/print', [AccountingPageController::class, 'purchasePrint'])->name('purchases.print');
+        Route::get('/purchases/{purchase}/attachment', [AccountingPageController::class, 'showPurchaseAttachment'])->name('purchases.attachment');
         Route::post('/purchases', [AccountingPageController::class, 'storePurchase'])->name('purchases.store');
         Route::put('/purchases/{purchase}', [AccountingPageController::class, 'updatePurchase'])->name('purchases.update');
         Route::patch('/purchases/{purchase}/approve', [AccountingPageController::class, 'approvePurchase'])->name('purchases.approve');
@@ -70,7 +72,6 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
         Route::get('/chart-of-accounts', [AccountingPageController::class, 'chartOfAccounts'])->name('chart_of_accounts');
         Route::post('/chart-of-accounts', [AccountingPageController::class, 'storeAccount'])->name('chart_of_accounts.store');
         Route::get('/expenses', [AccountingPageController::class, 'expenses'])->name('expenses');
-        Route::get('/expenses/report', [AccountingPageController::class, 'expensesReport'])->name('expenses.report');
         Route::post('/expenses', [AccountingPageController::class, 'storeExpense'])->name('expenses.store');
         Route::delete('/expenses/{expense}', [AccountingPageController::class, 'destroyExpense'])->name('expenses.destroy');
     });
@@ -84,6 +85,8 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:view_reports')->group(function () {
         Route::get('/reports', [AccountingPageController::class, 'reports'])->name('reports');
+        Route::get('/reports/view/{report}', [AccountingPageController::class, 'reportShow'])->name('reports.show');
+        Route::get('/reports/query', [AccountingPageController::class, 'reportQuery'])->name('reports.query');
     });
 
     Route::middleware('permission:manage_employees')->group(function () {

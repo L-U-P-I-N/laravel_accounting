@@ -6,7 +6,6 @@
     $canManageProducts = auth()->user()->hasPermission('manage_products');
     $canViewReports = auth()->user()->hasPermission('view_reports');
     $productsReportUrl = route('reports', ['report_type' => 'product_sales']);
-    $productsReportPrintUrl = route('reports', ['report_type' => 'product_sales', 'print' => 1]);
 @endphp
 
 @section('content')
@@ -17,11 +16,8 @@
     </div>
     <div class="d-flex gap-2 flex-wrap">
         @if ($canViewReports)
-            <a href="{{ $productsReportUrl }}" target="_blank" class="btn btn-outline-primary">
-                <i class="fas fa-table ms-1"></i> معاينة التقرير
-            </a>
-            <a href="{{ $productsReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
-                <i class="fas fa-print ms-1"></i> طباعة / PDF
+            <a href="{{ $productsReportUrl }}" class="btn btn-outline-primary">
+                <i class="fas fa-chart-bar ms-1"></i> مركز التقارير
             </a>
         @endif
         @if ($canManageProducts)
@@ -50,50 +46,6 @@
         </div>
     </div>
 </div>
-
-@if ($canViewReports)
-    <div class="list-card mb-4">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-            <div>
-                <h5 class="mb-1">تقرير المنتجات</h5>
-                <p class="text-muted mb-0">فلترة تقرير مبيعات المنتجات حسب منتج معين أو فترة زمنية من نفس الصفحة.</p>
-            </div>
-        </div>
-        <form method="GET" action="{{ route('reports') }}" target="_blank" class="row g-3 align-items-end">
-            <input type="hidden" name="report_type" value="product_sales">
-            <div class="col-lg-3 col-md-6">
-                <label class="form-label">المنتج</label>
-                <select name="product_id" class="form-select">
-                    <option value="">كل المنتجات</option>
-                    @foreach ($products as $product)
-                        <option value="{{ $product->id }}">{{ $product->name }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">الفترة</label>
-                <select name="period" class="form-select">
-                    <option value="monthly">شهري</option>
-                    <option value="quarterly">ربع سنوي</option>
-                    <option value="yearly">سنوي</option>
-                    <option value="custom">مخصص</option>
-                </select>
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">من تاريخ</label>
-                <input type="date" name="date_from" class="form-control">
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">إلى تاريخ</label>
-                <input type="date" name="date_to" class="form-control">
-            </div>
-            <div class="col-lg-3 col-md-6 d-flex gap-2">
-                <button type="submit" class="btn btn-primary flex-fill"><i class="fas fa-chart-line ms-1"></i>فتح التقرير</button>
-                <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill"><i class="fas fa-print ms-1"></i>طباعة</button>
-            </div>
-        </form>
-    </div>
-@endif
 
 @if (session('status'))
     <div class="alert alert-success">{{ session('status') }}</div>

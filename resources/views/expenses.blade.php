@@ -4,6 +4,8 @@
 
 @php
     $createExpenseModalHasErrors = $errors->any();
+    $canViewReports = auth()->user()->hasPermission('view_reports');
+    $expensesReportUrl = route('reports', ['report_type' => 'expense_details']);
 @endphp
 
 @section('content')
@@ -14,12 +16,11 @@
             <p class="text-muted mt-2 mb-0">تسجيل المصروفات باسم واضح وربطها مباشرة بحساب المصروف وحساب السداد في شجرة الحسابات.</p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
-            <a href="{{ route('expenses.report', request()->query()) }}" target="_blank" class="btn btn-outline-primary">
-                <i class="fas fa-table ms-1"></i> معاينة التقرير
-            </a>
-            <a href="{{ route('expenses.report', array_merge(request()->query(), ['print' => 1])) }}" target="_blank" class="btn btn-outline-dark">
-                <i class="fas fa-print ms-1"></i> طباعة / PDF
-            </a>
+            @if ($canViewReports)
+                <a href="{{ $expensesReportUrl }}" class="btn btn-outline-primary">
+                    <i class="fas fa-chart-bar ms-1"></i> مركز التقارير
+                </a>
+            @endif
             <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addExpenseModal">
                 <i class="fas fa-plus ms-1"></i> إضافة مصروف
             </button>
@@ -31,7 +32,7 @@
     @endif
 
     <div class="list-card mb-4">
-        <div class="card-header bg-transparent border-0 px-0 pt-0"><h5 class="mb-0">فلترة وطباعة تقرير المصروفات</h5></div>
+        <div class="card-header bg-transparent border-0 px-0 pt-0"><h5 class="mb-0">فلترة المصروفات</h5></div>
         <div class="card-body px-0 pb-0">
             <form method="GET" action="{{ route('expenses') }}" class="row g-3 align-items-end">
                 <div class="col-lg-3 col-md-6">

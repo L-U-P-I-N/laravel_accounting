@@ -145,6 +145,7 @@ body.sidebar-open {
 }
 
 .sidebar-toggle {
+    display: none;
     color: var(--secondary);
     font-size: 20px;
     border: none !important;
@@ -1299,6 +1300,12 @@ body.sidebar-open {
 }
 
 @media (max-width: 991.98px) {
+    .sidebar-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
     .sidebar {
         transform: translateX(100%);
         width: min(320px, calc(100vw - 2.5rem));

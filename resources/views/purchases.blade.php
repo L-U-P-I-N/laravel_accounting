@@ -1,5 +1,7 @@
 @extends('layouts.app')
 
+@php use Illuminate\Support\Facades\Storage; @endphp
+
 @section('title', 'المشتريات')
 
 @php
@@ -18,6 +20,19 @@
             'paid' => 'مدفوع',
             'cancelled' => 'ملغي',
         ];
+        $paymentStatusOptions = [
+            'paid' => 'دفع كامل',
+            'partial' => 'دفع جزئي',
+            'pending' => 'أجل',
+        ];
+        $paymentMethodOptions = [
+            'payables' => 'الدائنين الدائمين',
+            'cash' => 'نقدي',
+            'bank_transfer' => 'تحويل بنكي',
+            'cheque' => 'شيك',
+            'credit_card' => 'بطاقة ائتمان',
+            'other' => 'أخرى',
+        ];
         $purchasesReportParams = array_filter([
             'report_type' => 'payables',
             'supplier_id' => $supplierFilter !== '' ? $supplierFilter : null,
@@ -29,15 +44,12 @@
     <div class="page-header">
         <div>
             <h2 class="page-title"><i class="fas fa-shopping-cart"></i> المشتريات</h2>
-            <p class="text-muted mt-2 mb-0">إدارة المشتريات مع ربط سريع بتقرير الدائنين والطباعة.</p>
+            <p class="text-muted mt-2 mb-0">إدارة المشتريات ومتابعة طلبات الشراء.</p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
             @if ($canViewReports)
-                <a href="{{ route('reports', $purchasesReportParams) }}" target="_blank" class="btn btn-outline-primary">
-                    <i class="fas fa-table ms-1"></i> معاينة التقرير
-                </a>
-                <a href="{{ route('reports', array_merge($purchasesReportParams, ['print' => 1])) }}" target="_blank" class="btn btn-outline-dark">
-                    <i class="fas fa-print ms-1"></i> طباعة / PDF
+                <a href="{{ route('reports', $purchasesReportParams) }}" class="btn btn-outline-primary">
+                    <i class="fas fa-chart-bar ms-1"></i> مركز التقارير
                 </a>
             @endif
             @if ($canManagePurchases)
@@ -104,56 +116,6 @@
         </div>
     </div>
 
-    @if ($canViewReports)
-        <div class="row mb-4">
-            <div class="col-md-12">
-                <div class="list-card">
-                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                        <div>
-                            <h5 class="mb-1">تقرير المشتريات</h5>
-                            <p class="text-muted mb-0">أنشئ تقرير الذمم الدائنة من نفس الفلاتر أو غيّر المورد والفترة قبل فتحه.</p>
-                        </div>
-                    </div>
-                    <div class="card-body p-0">
-                        <form class="row g-3 align-items-end" method="GET" action="{{ route('reports') }}" target="_blank">
-                            <input type="hidden" name="report_type" value="payables">
-                            <div class="col-md-3">
-                                <label class="form-label">المورد</label>
-                                <select name="supplier_id" class="form-select">
-                                    <option value="">كل الموردين</option>
-                                    @foreach ($suppliers as $supplier)
-                                        <option value="{{ $supplier->id }}" {{ (string) $supplierFilter === (string) $supplier->id ? 'selected' : '' }}>{{ $supplier->name }}</option>
-                                    @endforeach
-                                </select>
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label">الفترة</label>
-                                <select name="period" class="form-select">
-                                    <option value="monthly" {{ $dateFrom === '' && $dateTo === '' ? 'selected' : '' }}>شهري</option>
-                                    <option value="quarterly">ربع سنوي</option>
-                                    <option value="yearly">سنوي</option>
-                                    <option value="custom" {{ $dateFrom !== '' || $dateTo !== '' ? 'selected' : '' }}>مخصص</option>
-                                </select>
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label">من تاريخ</label>
-                                <input type="date" class="form-control" name="date_from" value="{{ $dateFrom }}">
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label">إلى تاريخ</label>
-                                <input type="date" class="form-control" name="date_to" value="{{ $dateTo }}">
-                            </div>
-                            <div class="col-md-3 d-flex gap-2">
-                                <button type="submit" class="btn btn-primary flex-fill">فتح التقرير</button>
-                                <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill">طباعة</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    @endif
-
     <div class="row mb-4">
         <div class="col-md-3 mb-3 mb-md-0">
             <div class="stat-card">
@@ -165,15 +127,15 @@
         <div class="col-md-3 mb-3 mb-md-0">
             <div class="stat-card">
                 <div class="stat-icon orange"><i class="fas fa-clock"></i></div>
-                <div class="stat-value">{{ $purchases->where('status', 'pending')->count() }}</div>
+                <div class="stat-value">{{ $pendingPurchasesCount }}</div>
                 <div class="stat-label">في الانتظار</div>
             </div>
         </div>
         <div class="col-md-3 mb-3 mb-md-0">
             <div class="stat-card">
                 <div class="stat-icon green"><i class="fas fa-check-circle"></i></div>
-                <div class="stat-value">{{ $purchases->where('status', 'paid')->count() }}</div>
-                <div class="stat-label">مدفوع</div>
+                <div class="stat-value">{{ $paidPurchasesCount }}</div>
+                <div class="stat-label">معتمد / مدفوع</div>
             </div>
         </div>
         <div class="col-md-3">
@@ -204,13 +166,14 @@
                         <th>المدفوع</th>
                         <th>المتبقي</th>
                         <th>الحالة</th>
+                        <th>حالة الدفع</th>
                         <th>الإجراءات</th>
                     </tr>
                 </thead>
                 <tbody>
                     @if ($purchases->isEmpty())
                         <tr>
-                            <td colspan="8" class="text-center">لا توجد مشتريات</td>
+                            <td colspan="9" class="text-center">لا توجد مشتريات</td>
                         </tr>
                     @else
                         @foreach ($purchases as $purchase)
@@ -224,11 +187,26 @@
                                     default => 'danger',
                                 };
                                 $purchaseText = $statusOptions[$purchase->status] ?? 'ملغي';
+                                $paymentStatusClass = match ($purchase->payment_status) {
+                                    'paid' => 'success',
+                                    'partial' => 'info',
+                                    default => 'warning',
+                                };
+                                $paymentStatusText = $paymentStatusOptions[$purchase->payment_status] ?? 'غير محدد';
+                                $attachmentUrl = $purchase->attachment_path ? route('purchases.attachment', $purchase) : null;
                             @endphp
                             <tr>
                                 <td>
                                     <div class="fw-semibold">{{ $purchase->purchase_number }}</div>
-                                    <small class="text-muted">{{ $purchase->items->count() }} بند</small>
+                                    <small class="text-muted d-block">{{ $purchase->items->count() }} بند</small>
+                                    @if ($purchase->supplier_invoice_number)
+                                        <small class="text-muted d-block">فاتورة المورد: {{ $purchase->supplier_invoice_number }}</small>
+                                    @endif
+                                    @if ($attachmentUrl)
+                                        <a href="{{ $attachmentUrl }}" class="d-inline-flex align-items-center gap-1 small mt-1" target="_blank" rel="noopener">
+                                            <i class="fas fa-paperclip"></i> عرض الإرفاق
+                                        </a>
+                                    @endif
                                 </td>
                                 <td>{{ $purchase->supplier?->name ?? '-' }}</td>
                                 <td>{{ optional($purchase->purchase_date)->format('Y-m-d') ?: $purchase->purchase_date }}</td>
@@ -236,14 +214,12 @@
                                 <td>{{ number_format((float) $purchase->paid_amount, 2) }} {{ $company->currency }}</td>
                                 <td>{{ number_format((float) $purchase->balance_due, 2) }} {{ $company->currency }}</td>
                                 <td><span class="badge bg-{{ $purchaseClass }}">{{ $purchaseText }}</span></td>
+                                <td><span class="badge bg-{{ $paymentStatusClass }}">{{ $paymentStatusText }}</span></td>
                                 <td class="list-actions-col">
                                     <div class="list-actions-group">
                                         <button type="button" class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#showPurchaseModal{{ $purchase->id }}" title="عرض التفاصيل">
                                             <i class="fas fa-eye"></i>
                                         </button>
-                                        <a href="{{ route('purchases.print', $purchase) }}" target="_blank" class="btn btn-sm btn-outline-dark" title="طباعة الطلب">
-                                            <i class="fas fa-print"></i>
-                                        </a>
                                         @if ($canManagePurchases)
                                             <button type="button" class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editPurchaseModal{{ $purchase->id }}" title="تعديل الطلب">
                                                 <i class="fas fa-edit"></i>
@@ -285,6 +261,9 @@
                 'paid' => 'success',
                 default => 'danger',
             };
+            $showPaymentStatus = $paymentStatusOptions[$purchase->payment_status] ?? 'غير محدد';
+            $showPaymentMethod = $purchase->payment_method ? ($paymentMethodOptions[$purchase->payment_method] ?? $purchase->payment_method) : 'غير محدد';
+            $showAttachmentUrl = $purchase->attachment_path ? route('purchases.attachment', $purchase) : null;
         @endphp
         <div class="modal fade" id="showPurchaseModal{{ $purchase->id }}" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-xl modal-fullscreen-sm-down">
@@ -292,11 +271,6 @@
                     <div class="modal-header">
                         <div>
                             <h5 class="modal-title">تفاصيل طلب الشراء {{ $purchase->purchase_number }}</h5>
-                        </div>
-                        <div class="d-flex align-items-center gap-2 me-auto">
-                            <a href="{{ route('purchases.print', $purchase) }}" target="_blank" class="btn btn-outline-dark btn-sm">
-                                <i class="fas fa-print ms-1"></i> طباعة
-                            </a>
                         </div>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
@@ -306,6 +280,12 @@
                             <div class="col-md-3"><div class="list-card mb-0"><strong>تاريخ الشراء:</strong><div class="text-muted mt-1">{{ optional($purchase->purchase_date)->format('Y-m-d') ?: $purchase->purchase_date }}</div></div></div>
                             <div class="col-md-3"><div class="list-card mb-0"><strong>تاريخ الاستحقاق:</strong><div class="text-muted mt-1">{{ optional($purchase->due_date)->format('Y-m-d') ?: ($purchase->due_date ?? '-') }}</div></div></div>
                             <div class="col-md-3"><div class="list-card mb-0"><strong>الحالة:</strong><div class="mt-1"><span class="badge bg-{{ $showPurchaseClass }}">{{ $statusOptions[$purchase->status] ?? 'ملغي' }}</span></div></div></div>
+                        </div>
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-3"><div class="list-card mb-0"><strong>رقم فاتورة المورد:</strong><div class="text-muted mt-1">{{ $purchase->supplier_invoice_number ?: '-' }}</div></div></div>
+                            <div class="col-md-3"><div class="list-card mb-0"><strong>طريقة الدفع:</strong><div class="text-muted mt-1">{{ $showPaymentMethod }}</div></div></div>
+                            <div class="col-md-3"><div class="list-card mb-0"><strong>حالة الدفع:</strong><div class="mt-1"><span class="badge bg-{{ $purchase->payment_status === 'paid' ? 'success' : ($purchase->payment_status === 'partial' ? 'info' : 'warning') }}">{{ $showPaymentStatus }}</span></div></div></div>
+                            <div class="col-md-3"><div class="list-card mb-0"><strong>تاريخ الدفع:</strong><div class="text-muted mt-1">{{ optional($purchase->payment_date)->format('Y-m-d') ?: '-' }}</div></div></div>
                         </div>
 
                         <div class="table-responsive">
@@ -342,6 +322,15 @@
                             <div class="col-md-4"><div class="list-card mb-0"><strong>الضريبة:</strong> <span>{{ number_format((float) $purchase->tax_amount, 2) }} {{ $company->currency }}</span></div></div>
                             <div class="col-md-4"><div class="list-card mb-0"><strong>الإجمالي:</strong> <span>{{ number_format((float) $purchase->total, 2) }} {{ $company->currency }}</span></div></div>
                         </div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-4"><div class="list-card mb-0"><strong>المبلغ المدفوع:</strong> <span>{{ number_format((float) $purchase->paid_amount, 2) }} {{ $company->currency }}</span></div></div>
+                            <div class="col-md-4"><div class="list-card mb-0"><strong>المتبقي:</strong> <span>{{ number_format((float) $purchase->balance_due, 2) }} {{ $company->currency }}</span></div></div>
+                            @if ($showAttachmentUrl)
+                                <div class="col-md-4"><div class="list-card mb-0 text-center"><strong>ملف الفاتورة:</strong>
+                                    <div class="mt-2"><a href="{{ $showAttachmentUrl }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary"><i class="fas fa-file-download ms-1"></i> تنزيل</a></div>
+                                </div></div>
+                            @endif
+                        </div>
 
                         @if ($purchase->notes)
                             <div class="list-card mb-0 mt-3">
@@ -373,7 +362,7 @@
             <div class="modal fade" id="editPurchaseModal{{ $purchase->id }}" tabindex="-1" aria-hidden="true">
                 <div class="modal-dialog modal-xl modal-fullscreen-sm-down">
                     <div class="modal-content">
-                        <form method="POST" action="{{ route('purchases.update', $purchase) }}" class="purchase-form" data-purchase-form>
+                        <form method="POST" action="{{ route('purchases.update', $purchase) }}" class="purchase-form" data-purchase-form data-paid-amount="{{ number_format((float) $purchase->paid_amount, 2, '.', '') }}" enctype="multipart/form-data">
                             @csrf
                             @method('PUT')
                             <input type="hidden" name="purchase_modal" value="{{ $editPurchaseModalKey }}">
@@ -417,7 +406,47 @@
                                             @endforeach
                                         </select>
                                     </div>
-                                    <div class="col-md-8">
+                                    <div class="col-md-4">
+                                        <label class="form-label">حالة الدفع</label>
+                                        <select name="payment_status" class="form-select" data-payment-status-select>
+                                            @foreach ($paymentStatusOptions as $value => $label)
+                                                <option value="{{ $value }}" {{ ($editPurchaseModalHasErrors ? old('payment_status', $purchase->payment_status) : $purchase->payment_status) === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4" data-payment-method-container>
+                                        <div data-payment-method-input>
+                                            <label class="form-label">طريقة الدفع</label>
+                                            <select name="payment_method" class="form-select">
+                                                <option value="" {{ ($editPurchaseModalHasErrors ? old('payment_method') : $purchase->payment_method) ? '' : 'selected' }}>لم يتم التحديد</option>
+                                                @foreach ($paymentMethodOptions as $value => $label)
+                                                    <option value="{{ $value }}" {{ ($editPurchaseModalHasErrors ? old('payment_method') : $purchase->payment_method) === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                                @endforeach
+                                            </select>
+                                        </div>
+                                        {{-- <div class="alert alert-info mt-2 d-none" data-payables-note>
+                                            عند اختيار حالة الدفع "أجل" يتم ربط الفاتورة تلقائياً بحساب الدائنين الدائمين.
+                                        </div> --}}
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">رقم فاتورة المورد (اختياري)</label>
+                                        <input type="text" name="supplier_invoice_number" class="form-control" value="{{ $editPurchaseModalHasErrors ? old('supplier_invoice_number') : $purchase->supplier_invoice_number }}">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">تاريخ الدفع</label>
+                                        <input type="date" name="payment_date" class="form-control" value="{{ $editPurchaseModalHasErrors ? old('payment_date') : optional($purchase->payment_date)->format('Y-m-d') }}">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label d-flex justify-content-between align-items-center">
+                                            <span>ملف الفاتورة</span>
+                                            @if ($purchase->attachment_path)
+                                                <a href="{{ Storage::disk('public')->url($purchase->attachment_path) }}" target="_blank" rel="noopener" class="small">عرض الحالي</a>
+                                            @endif
+                                        </label>
+                                        <input type="file" name="attachment" class="form-control" accept="application/pdf,image/*">
+                                        <small class="text-muted">PDF أو صورة، حتى 8 ميغابايت</small>
+                                    </div>
+                                    <div class="col-md-12">
                                         <label class="form-label">الملاحظات</label>
                                         <textarea name="notes" class="form-control" rows="2">{{ $editPurchaseModalHasErrors ? old('notes') : $purchase->notes }}</textarea>
                                     </div>
@@ -462,9 +491,10 @@
                                 </div>
                                 <button type="button" class="btn btn-outline-primary" data-add-purchase-item>إضافة بند</button>
                                 <div class="row mt-4 g-3">
-                                    <div class="col-md-4"><div class="list-card"><strong>المجموع الفرعي:</strong> <span data-purchase-subtotal>0.00 {{ $company->currency }}</span></div></div>
-                                    <div class="col-md-4"><div class="list-card"><strong>الضريبة:</strong> <span data-purchase-tax>0.00 {{ $company->currency }}</span></div></div>
-                                    <div class="col-md-4"><div class="list-card"><strong>الإجمالي:</strong> <span data-purchase-total>0.00 {{ $company->currency }}</span></div></div>
+                                    <div class="col-md-3"><div class="list-card"><strong>المجموع الفرعي:</strong> <span data-purchase-subtotal>0.00 {{ $company->currency }}</span></div></div>
+                                    <div class="col-md-3"><div class="list-card"><strong>الضريبة:</strong> <span data-purchase-tax>0.00 {{ $company->currency }}</span></div></div>
+                                    <div class="col-md-3"><div class="list-card"><strong>الإجمالي:</strong> <span data-purchase-total>0.00 {{ $company->currency }}</span></div></div>
+                                    <div class="col-md-3"><div class="list-card"><strong>المتبقي:</strong> <span data-purchase-remaining>{{ number_format((float) $purchase->balance_due, 2) }} {{ $company->currency }}</span></div></div>
                                 </div>
                             </div>
                             <div class="modal-footer">
@@ -483,7 +513,7 @@
     <div class="modal fade" id="addPurchaseModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
-                <form method="POST" action="{{ route('purchases.store') }}" class="purchase-form" data-purchase-form>
+                <form method="POST" action="{{ route('purchases.store') }}" class="purchase-form" data-purchase-form data-paid-amount="0" enctype="multipart/form-data">
                     @csrf
                     <input type="hidden" name="purchase_modal" value="create">
                     <div class="modal-header">
@@ -526,7 +556,40 @@
                                     @endforeach
                                 </select>
                             </div>
-                            <div class="col-md-8">
+                            <div class="col-md-4">
+                                <label class="form-label">حالة الدفع</label>
+                                <select name="payment_status" class="form-select" data-payment-status-select>
+                                    @foreach ($paymentStatusOptions as $value => $label)
+                                        <option value="{{ $value }}" {{ old('payment_status', 'pending') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div class="col-md-4" data-payment-method-container>
+                                <div data-payment-method-input>
+                                    <label class="form-label">طريقة الدفع</label>
+                                    <select name="payment_method" class="form-select">
+                                        <option value="" {{ old('payment_method') ? '' : 'selected' }}>لم يتم التحديد</option>
+                                        @foreach ($paymentMethodOptions as $value => $label)
+                                            <option value="{{ $value }}" {{ old('payment_method') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">رقم فاتورة المورد (اختياري)</label>
+                                <input type="text" name="supplier_invoice_number" class="form-control" value="{{ old('supplier_invoice_number') }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">تاريخ الدفع</label>
+                                <input type="date" name="payment_date" class="form-control" value="{{ old('payment_date') }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">ملف الفاتورة</label>
+                                <input type="file" name="attachment" class="form-control" accept="application/pdf,image/*" required>
+                                <small class="text-muted">PDF أو صورة، حتى 8 ميغابايت</small>
+                            </div>
+                            <div class="col-md-12">
                                 <label class="form-label">الملاحظات</label>
                                 <textarea name="notes" class="form-control" rows="2">{{ old('notes') }}</textarea>
                             </div>
@@ -582,9 +645,10 @@
                         </div>
                         <button type="button" class="btn btn-outline-primary" data-add-purchase-item>إضافة بند</button>
                         <div class="row mt-4 g-3">
-                            <div class="col-md-4"><div class="list-card"><strong>المجموع الفرعي:</strong> <span data-purchase-subtotal>0.00 {{ $company->currency }}</span></div></div>
-                            <div class="col-md-4"><div class="list-card"><strong>الضريبة:</strong> <span data-purchase-tax>0.00 {{ $company->currency }}</span></div></div>
-                            <div class="col-md-4"><div class="list-card"><strong>الإجمالي:</strong> <span data-purchase-total>0.00 {{ $company->currency }}</span></div></div>
+                            <div class="col-md-3"><div class="list-card"><strong>المجموع الفرعي:</strong> <span data-purchase-subtotal>0.00 {{ $company->currency }}</span></div></div>
+                            <div class="col-md-3"><div class="list-card"><strong>الضريبة:</strong> <span data-purchase-tax>0.00 {{ $company->currency }}</span></div></div>
+                            <div class="col-md-3"><div class="list-card"><strong>الإجمالي:</strong> <span data-purchase-total>0.00 {{ $company->currency }}</span></div></div>
+                            <div class="col-md-3"><div class="list-card"><strong>المتبقي:</strong> <span data-purchase-remaining>0.00 {{ $company->currency }}</span></div></div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -637,6 +701,8 @@ function calculatePurchaseFormTotals(form) {
     const taxTarget = form.querySelector('[data-purchase-tax]');
     const totalTarget = form.querySelector('[data-purchase-total]');
     const grandTotal = subtotal + taxAmount;
+    const paidAmountPreview = purchaseNumericValue(form.dataset.paidAmount || '0');
+    const remainingTarget = form.querySelector('[data-purchase-remaining]');
 
     if (subtotalTarget) {
         subtotalTarget.textContent = `${subtotal.toFixed(2)} {{ $company->currency }}`;
@@ -648,6 +714,11 @@ function calculatePurchaseFormTotals(form) {
 
     if (totalTarget) {
         totalTarget.textContent = `${grandTotal.toFixed(2)} {{ $company->currency }}`;
+    }
+
+    if (remainingTarget) {
+        const remainingValue = Math.max(grandTotal - paidAmountPreview, 0);
+        remainingTarget.textContent = `${remainingValue.toFixed(2)} {{ $company->currency }}`;
     }
 }
 
@@ -775,9 +846,37 @@ function addPurchaseRow(form) {
     calculatePurchaseFormTotals(form);
 }
 
+function initializePurchasePaymentBehavior(form) {
+    const statusSelect = form.querySelector('[data-payment-status-select]');
+    const methodWrapper = form.querySelector('[data-payment-method-input]');
+    const payablesNote = form.querySelector('[data-payables-note]');
+    const methodSelect = methodWrapper?.querySelector('select[name="payment_method"]');
+
+    if (!statusSelect || !methodWrapper) {
+        return;
+    }
+
+    const togglePaymentPresentation = () => {
+        const isDeferred = statusSelect.value === 'pending';
+        methodWrapper.classList.toggle('d-none', isDeferred);
+        payablesNote?.classList.toggle('d-none', !isDeferred);
+
+        if (methodSelect) {
+            methodSelect.disabled = isDeferred;
+            if (isDeferred) {
+                methodSelect.value = '';
+            }
+        }
+    };
+
+    statusSelect.addEventListener('change', togglePaymentPresentation);
+    togglePaymentPresentation();
+}
+
 document.querySelectorAll('[data-purchase-form]').forEach((form) => {
     form.querySelectorAll('[data-purchase-item-row]').forEach((row) => bindPurchaseRow(row, form));
     form.querySelector('[data-add-purchase-item]')?.addEventListener('click', () => addPurchaseRow(form));
+    initializePurchasePaymentBehavior(form);
     calculatePurchaseFormTotals(form);
 });
 

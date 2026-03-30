@@ -33,7 +33,7 @@
             @if ($currentUser?->hasPermission('manage_invoices'))
                 <a href="{{ route('invoices') }}" class="nav-link {{ request()->routeIs('invoices*') ? 'active' : '' }}">
                     <i class="fas fa-file-invoice"></i>
-                    <span>الفواتير</span>
+                    <span>المبيعات</span>
                 </a>
             @endif
             @if ($currentUser?->hasPermission('manage_purchases'))
@@ -101,7 +101,7 @@
 
     <div class="main-content" id="mainContent">
         <nav class="top-navbar">
-            <button class="btn btn-link sidebar-toggle" onclick="toggleSidebar()">
+            <button type="button" class="btn btn-link sidebar-toggle" onclick="toggleSidebar()" aria-label="فتح القائمة الجانبية">
                 <i class="fas fa-bars"></i>
             </button>
 

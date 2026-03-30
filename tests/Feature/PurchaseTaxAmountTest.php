@@ -12,6 +12,8 @@ use App\Models\TaxSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PurchaseTaxAmountTest extends TestCase
@@ -22,11 +24,17 @@ class PurchaseTaxAmountTest extends TestCase
     {
         [$company, $user, $supplier, $product] = $this->purchaseContext();
 
+        Storage::fake('public');
+
         $request = Request::create('/purchases', 'POST', [
             'supplier_id' => $supplier->id,
             'purchase_date' => '2026-03-27',
             'due_date' => '2026-04-27',
             'status' => 'draft',
+            'payment_status' => 'pending',
+            'payment_method' => 'cash',
+            'supplier_invoice_number' => 'SUP-INV-001',
+            'payment_date' => '2026-03-27',
             'item_product_id' => [$product->id],
             'item_description' => ['Inventory Item'],
             'item_quantity' => [2],
@@ -34,6 +42,7 @@ class PurchaseTaxAmountTest extends TestCase
             'item_tax_rate' => [15],
         ]);
         $request->setUserResolver(fn () => $user);
+        $request->files->set('attachment', UploadedFile::fake()->create('invoice.pdf', 150, 'application/pdf'));
 
         app(AccountingPageController::class)->storePurchase($request);
 
@@ -56,11 +65,17 @@ class PurchaseTaxAmountTest extends TestCase
     {
         [$company, $user, $supplier, $product] = $this->purchaseContext();
 
+        Storage::fake('public');
+
         $storeRequest = Request::create('/purchases', 'POST', [
             'supplier_id' => $supplier->id,
             'purchase_date' => '2026-03-27',
             'due_date' => '2026-04-27',
             'status' => 'draft',
+            'payment_status' => 'pending',
+            'payment_method' => 'cash',
+            'supplier_invoice_number' => 'SUP-INV-001',
+            'payment_date' => '2026-03-27',
             'item_product_id' => [$product->id],
             'item_description' => ['Inventory Item'],
             'item_quantity' => [2],
@@ -68,6 +83,7 @@ class PurchaseTaxAmountTest extends TestCase
             'item_tax_rate' => [15],
         ]);
         $storeRequest->setUserResolver(fn () => $user);
+        $storeRequest->files->set('attachment', UploadedFile::fake()->create('invoice.pdf', 150, 'application/pdf'));
 
         app(AccountingPageController::class)->storePurchase($storeRequest);
 
@@ -78,6 +94,10 @@ class PurchaseTaxAmountTest extends TestCase
             'purchase_date' => '2026-03-28',
             'due_date' => '2026-04-30',
             'status' => 'approved',
+            'payment_status' => 'pending',
+            'payment_method' => 'cash',
+            'supplier_invoice_number' => 'SUP-INV-001',
+            'payment_date' => '2026-03-29',
             'item_product_id' => [$product->id],
             'item_description' => ['Inventory Item Updated'],
             'item_quantity' => [3],
@@ -109,6 +129,8 @@ class PurchaseTaxAmountTest extends TestCase
     {
         [$company, $user, $supplier, $product] = $this->purchaseContext();
 
+        Storage::fake('public');
+
         $customInputVatAccount = Account::create([
             'company_id' => $company->id,
             'code' => '2398',
@@ -134,6 +156,10 @@ class PurchaseTaxAmountTest extends TestCase
             'purchase_date' => '2026-03-27',
             'due_date' => '2026-04-27',
             'status' => 'approved',
+            'payment_status' => 'pending',
+            'payment_method' => 'cash',
+            'supplier_invoice_number' => 'SUP-INV-001',
+            'payment_date' => '2026-03-27',
             'item_product_id' => [$product->id],
             'item_description' => ['Inventory Item'],
             'item_quantity' => [2],
@@ -141,6 +167,7 @@ class PurchaseTaxAmountTest extends TestCase
             'item_tax_rate' => [15],
         ]);
         $request->setUserResolver(fn () => $user);
+        $request->files->set('attachment', UploadedFile::fake()->create('invoice.pdf', 150, 'application/pdf'));
 
         app(AccountingPageController::class)->storePurchase($request);
 

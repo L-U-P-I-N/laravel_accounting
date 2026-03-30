@@ -1,11 +1,22 @@
 @extends('layouts.app')
 
-@section('title', 'إنشاء فاتورة جديدة')
-
 @php
     $canManageInvoices = auth()->user()->hasPermission('manage_invoices');
     $defaultTaxRate = $defaultTaxRate ?? 15; // fallback when controller does not provide rate
+    $isEditingInvoice = isset($invoice) && $invoice->exists;
+    $invoiceDateValue = old('invoice_date', $isEditingInvoice ? optional($invoice->invoice_date)->format('Y-m-d') : now()->format('Y-m-d'));
+    $dueDateValue = old('due_date', $isEditingInvoice ? optional($invoice->due_date)->format('Y-m-d') : now()->addDays(30)->format('Y-m-d'));
+    $customerIdValue = old('customer_id', $isEditingInvoice ? $invoice->customer_id : null);
+    $branchIdValue = old('branch_id', $isEditingInvoice ? $invoice->branch_id : ($defaultBranchId ?? null));
+    $employeeIdValue = old('employee_id', $isEditingInvoice ? $invoice->employee_id : null);
+    $salesChannelIdValue = old('sales_channel_id', $isEditingInvoice ? $invoice->sales_channel_id : ($defaultSalesChannelId ?? null));
+    $paymentMethodIdValue = old('payment_method_id', $isEditingInvoice ? $invoice->payment_method_id : ($defaultPaymentMethodId ?? null));
+    $invoiceStatusValue = old('status', $isEditingInvoice ? $invoice->status : 'sent');
+    $notesValue = old('notes', $isEditingInvoice ? $invoice->notes : '');
+    $termsValue = old('terms', $isEditingInvoice ? $invoice->terms : '');
 @endphp
+
+@section('title', $isEditingInvoice ? 'تعديل عملية البيع' : 'إضافة مبيعات')
 
 @push('styles')
 <style>
@@ -67,17 +78,17 @@
 @section('content')
 <div class="page-header">
     <div>
-        <h2 class="page-title"><i class="fas fa-plus-circle"></i> إنشاء فاتورة جديدة</h2>
-        <p class="text-muted mt-2 mb-0">إضافة فاتورة مبيعات جديدة بنفس هيكلة واجهة Flask</p>
+        <h2 class="page-title"><i class="fas fa-plus-circle"></i> {{ $isEditingInvoice ? 'تعديل عملية البيع' : 'إضافة مبيعات' }}</h2>
+        <p class="text-muted mt-2 mb-0">{{ $isEditingInvoice ? 'تحديث بيانات عملية البيع الحالية مع الحفاظ على سلامة المخزون.' : 'إضافة مبيعات جديدة بنفس هيكلة واجهة Flask' }}</p>
     </div>
     <a href="{{ route('invoices') }}" class="btn btn-outline-secondary">
-        <i class="fas fa-arrow-right ms-2"></i>العودة للفواتير
+        <i class="fas fa-arrow-right ms-2"></i>العودة للمبيعات
     </a>
 </div>
 
 <div class="invoice-form">
     @php
-        $invoiceItems = collect(old('item_description', ['']))->map(function ($description, $index) use ($defaultTaxRate) {
+        $invoiceItems = collect(old('item_description', []))->map(function ($description, $index) use ($defaultTaxRate) {
             return (object) [
                 'product_id' => old('item_product_id.' . $index),
                 'description' => $description,
@@ -86,32 +97,94 @@
                 'tax_rate' => old('item_tax_rate.' . $index, $defaultTaxRate),
             ];
         });
+
+        if ($invoiceItems->isEmpty()) {
+            $invoiceItems = $isEditingInvoice
+                ? $invoice->items->map(function ($item) {
+                    return (object) [
+                        'product_id' => $item->product_id,
+                        'description' => $item->description,
+                        'quantity' => $item->quantity,
+                        'unit_price' => $item->unit_price,
+                        'tax_rate' => $item->tax_rate,
+                    ];
+                })
+                : collect([(object) [
+                    'product_id' => null,
+                    'description' => '',
+                    'quantity' => 1,
+                    'unit_price' => 0,
+                    'tax_rate' => $defaultTaxRate,
+                ]]);
+        }
     @endphp
-    <form method="POST" action="{{ route('invoices.store') }}" data-invoice-form>
+    <form method="POST" action="{{ $isEditingInvoice ? route('invoices.update', $invoice) : route('invoices.store') }}" data-invoice-form>
         @csrf
+        @if ($isEditingInvoice)
+            @method('PUT')
+        @endif
         <div class="row mb-4">
             <div class="col-md-4 mb-3 mb-md-0">
                 <label class="form-label">العميل *</label>
                 <select name="customer_id" class="form-select" required>
                     <option value="">اختر العميل</option>
                     @foreach ($customers as $customer)
-                        <option value="{{ $customer->id }}" {{ (string) old('customer_id') === (string) $customer->id ? 'selected' : '' }}>{{ $customer->name }}</option>
+                        <option value="{{ $customer->id }}" {{ (string) $customerIdValue === (string) $customer->id ? 'selected' : '' }}>{{ $customer->name }}</option>
                     @endforeach
                 </select>
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
                 <label class="form-label">تاريخ الفاتورة *</label>
-                <input type="date" name="invoice_date" class="form-control" value="{{ old('invoice_date', now()->format('Y-m-d')) }}" required>
+                <input type="date" name="invoice_date" class="form-control" value="{{ $invoiceDateValue }}" required>
             </div>
             <div class="col-md-3">
                 <label class="form-label">تاريخ الاستحقاق</label>
-                <input type="date" name="due_date" class="form-control" value="{{ old('due_date', now()->addDays(30)->format('Y-m-d')) }}">
+                <input type="date" name="due_date" class="form-control" value="{{ $dueDateValue }}">
             </div>
             <div class="col-md-2">
                 <label class="form-label">الحالة</label>
                 <select name="status" class="form-select">
-                    <option value="draft" {{ old('status', 'sent') === 'draft' ? 'selected' : '' }}>مسودة</option>
-                    <option value="sent" {{ old('status', 'sent') === 'sent' ? 'selected' : '' }}>مرسلة</option>
+                    <option value="draft" {{ $invoiceStatusValue === 'draft' ? 'selected' : '' }}>مسودة</option>
+                    <option value="sent" {{ $invoiceStatusValue === 'sent' ? 'selected' : '' }}>مرسلة</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-3 mb-3 mb-md-0">
+                <label class="form-label">الفرع *</label>
+                <select name="branch_id" class="form-select" required>
+                    <option value="">اختر الفرع</option>
+                    @foreach ($branches as $branch)
+                        <option value="{{ $branch->id }}" {{ (string) $branchIdValue === (string) $branch->id ? 'selected' : '' }}>{{ $branch->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <label class="form-label">الموظف</label>
+                <select name="employee_id" class="form-select">
+                    <option value="">بدون موظف</option>
+                    @foreach ($employees as $employee)
+                        <option value="{{ $employee->id }}" {{ (string) $employeeIdValue === (string) $employee->id ? 'selected' : '' }}>{{ trim($employee->full_name) !== '' ? $employee->full_name : ('موظف #' . $employee->id) }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <label class="form-label">قناة البيع *</label>
+                <select name="sales_channel_id" class="form-select" required>
+                    <option value="">اختر قناة البيع</option>
+                    @foreach ($salesChannels as $salesChannel)
+                        <option value="{{ $salesChannel->id }}" {{ (string) $salesChannelIdValue === (string) $salesChannel->id ? 'selected' : '' }}>{{ $salesChannel->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">طريقة الدفع *</label>
+                <select name="payment_method_id" class="form-select" required>
+                    <option value="">اختر طريقة الدفع</option>
+                    @foreach ($paymentMethods as $paymentMethod)
+                        <option value="{{ $paymentMethod->id }}" {{ (string) $paymentMethodIdValue === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
+                    @endforeach
                 </select>
             </div>
         </div>
@@ -127,7 +200,7 @@
                                 <select name="item_product_id[]" class="form-select invoice-product-select">
                                     <option value="">اختر المنتج</option>
                                     @foreach ($products as $product)
-                                        <option value="{{ $product->id }}" data-description="{{ $product->description ?? '' }}" data-sell-price="{{ $product->sell_price ?? 0 }}" {{ (string) $item->product_id === (string) $product->id ? 'selected' : '' }}>{{ $product->name }}</option>
+                                        <option value="{{ $product->id }}" data-description="{{ $product->description ?? '' }}" data-sell-price="{{ $product->sell_price ?? 0 }}" data-stock-quantity="{{ $product->stock_quantity ?? 0 }}" data-product-type="{{ $product->type }}" data-product-name="{{ $product->name }}" {{ (string) $item->product_id === (string) $product->id ? 'selected' : '' }}>{{ $product->name }}{{ $product->type !== 'service' ? ' - المتاح: ' . number_format((float) $product->stock_quantity, 2) : '' }}</option>
                                     @endforeach
                                 </select>
                             </div>
@@ -137,7 +210,10 @@
                             </div>
                             <div class="col-md-1">
                                 <label class="form-label">الكمية *</label>
-                                <input type="number" name="item_quantity[]" class="form-control invoice-item-quantity" value="{{ $item->quantity }}" min="0.01" step="0.01" required>
+                                @php $quantityErrorKey = 'item_quantity.' . $loop->index; @endphp
+                                <input type="number" name="item_quantity[]" class="form-control invoice-item-quantity @error($quantityErrorKey) is-invalid @enderror" value="{{ $item->quantity }}" min="0.01" step="0.01" required>
+                                @error($quantityErrorKey)<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                                <div class="form-text text-danger d-none" data-stock-feedback></div>
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">السعر *</label>
@@ -169,14 +245,16 @@
             </div>
         </div>
 
+        <div class="alert alert-warning d-none mt-3" data-invoice-stock-warning role="alert"></div>
+
         <div class="row mt-4">
             <div class="col-md-12">
                 <label class="form-label">ملاحظات</label>
-                <textarea name="notes" class="form-control" rows="3" placeholder="ملاحظات إضافية...">{{ old('notes') }}</textarea>
+                <textarea name="notes" class="form-control" rows="3" placeholder="ملاحظات إضافية...">{{ $notesValue }}</textarea>
             </div>
             <div class="col-md-12 mt-3">
                 <label class="form-label">الشروط</label>
-                <textarea name="terms" class="form-control" rows="2" placeholder="شروط السداد أو شروط الفاتورة">{{ old('terms') }}</textarea>
+                <textarea name="terms" class="form-control" rows="2" placeholder="شروط السداد أو شروط الفاتورة">{{ $termsValue }}</textarea>
             </div>
         </div>
 
@@ -206,7 +284,7 @@
                 <div class="d-flex gap-2 flex-wrap">
                     @if ($canManageInvoices)
                         <button type="submit" class="btn btn-save">
-                            <i class="fas fa-save ms-2"></i>حفظ الفاتورة
+                            <i class="fas fa-save ms-2"></i>{{ $isEditingInvoice ? 'حفظ التعديلات' : 'حفظ الفاتورة' }}
                         </button>
                     @endif
                     <a href="{{ route('invoices') }}" class="btn btn-outline-secondary">
@@ -254,6 +332,102 @@ function recalculateInvoiceTotals(form) {
     form.querySelector('#subtotal').textContent = `${subtotal.toFixed(2)} {{ $company->currency }}`;
     form.querySelector('#taxAmount').textContent = `${taxAmount.toFixed(2)} {{ $company->currency }}`;
     form.querySelector('#totalAmount').textContent = `${total.toFixed(2)} {{ $company->currency }}`;
+    updateInvoiceStockWarnings(form);
+}
+
+function invoiceSelectedProductOption(row) {
+    const select = row.querySelector('.invoice-product-select');
+
+    if (!select || select.selectedIndex < 0) {
+        return null;
+    }
+
+    return select.options[select.selectedIndex] || null;
+}
+
+function setInvoiceRowStockMessage(row, message) {
+    const quantityInput = row.querySelector('.invoice-item-quantity');
+    const feedback = row.querySelector('[data-stock-feedback]');
+
+    if (quantityInput) {
+        quantityInput.classList.toggle('is-invalid', Boolean(message));
+    }
+
+    if (!feedback) {
+        return;
+    }
+
+    if (message) {
+        feedback.textContent = message;
+        feedback.classList.remove('d-none');
+
+        return;
+    }
+
+    feedback.textContent = '';
+    feedback.classList.add('d-none');
+}
+
+function updateInvoiceStockWarnings(form) {
+    const groupedProducts = new Map();
+    const warningBox = form.querySelector('[data-invoice-stock-warning]');
+
+    form.querySelectorAll('[data-invoice-item-row]').forEach((row) => {
+        setInvoiceRowStockMessage(row, '');
+
+        const selectedOption = invoiceSelectedProductOption(row);
+        if (!selectedOption || !selectedOption.value || selectedOption.dataset.productType === 'service') {
+            return;
+        }
+
+        const quantity = invoiceNumericValue(row.querySelector('.invoice-item-quantity')?.value);
+        if (quantity <= 0) {
+            return;
+        }
+
+        const productId = selectedOption.value;
+        const existingGroup = groupedProducts.get(productId) ?? {
+            available: invoiceNumericValue(selectedOption.dataset.stockQuantity),
+            name: selectedOption.dataset.productName || selectedOption.textContent.trim(),
+            requested: 0,
+            rows: [],
+        };
+
+        existingGroup.requested += quantity;
+        existingGroup.rows.push(row);
+        groupedProducts.set(productId, existingGroup);
+    });
+
+    const messages = [];
+
+    groupedProducts.forEach((group) => {
+        if (group.requested <= group.available) {
+            return;
+        }
+
+        const message = group.available > 0
+            ? `الكمية المتاحة للمنتج "${group.name}" هي ${group.available.toFixed(2)} فقط، بينما إجمالي الكمية المطلوبة ${group.requested.toFixed(2)}.`
+            : `المنتج "${group.name}" نفدت كميته الحالية ولا يمكن إضافته إلى الفاتورة.`;
+
+        group.rows.forEach((row) => setInvoiceRowStockMessage(row, message));
+        messages.push(message);
+    });
+
+    if (warningBox) {
+        if (messages.length > 0) {
+            warningBox.innerHTML = messages.map((message) => `<div>${message}</div>`).join('');
+            warningBox.classList.remove('d-none');
+        } else {
+            warningBox.innerHTML = '';
+            warningBox.classList.add('d-none');
+        }
+    }
+
+    form.querySelectorAll('button[type="submit"]').forEach((button) => {
+        button.disabled = messages.length > 0;
+    });
+
+    return messages.length === 0;
 }
 
 function applyInvoiceProduct(row, form) {
@@ -320,6 +494,7 @@ function addInvoiceRow(form) {
     clone.querySelectorAll('input').forEach((input) => {
         if (input.classList.contains('invoice-item-quantity')) {
             input.value = '1';
+            input.classList.remove('is-invalid');
         } else if (input.classList.contains('invoice-item-tax')) {
             input.value = '{{ $defaultTaxRate }}';
         } else if (input.classList.contains('invoice-item-total')) {
@@ -328,6 +503,10 @@ function addInvoiceRow(form) {
             input.value = '';
         }
         delete input.dataset.autoFilled;
+    });
+    clone.querySelectorAll('[data-stock-feedback]').forEach((feedback) => {
+        feedback.textContent = '';
+        feedback.classList.add('d-none');
     });
     clone.querySelectorAll('select').forEach((select) => {
         select.selectedIndex = 0;
@@ -341,6 +520,14 @@ function addInvoiceRow(form) {
 document.querySelectorAll('[data-invoice-form]').forEach((form) => {
     form.querySelectorAll('[data-invoice-item-row]').forEach((row) => bindInvoiceRow(row, form));
     form.querySelector('#addInvoiceItem')?.addEventListener('click', () => addInvoiceRow(form));
+    form.addEventListener('submit', (event) => {
+        if (updateInvoiceStockWarnings(form)) {
+            return;
+        }
+
+        event.preventDefault();
+        form.querySelector('.invoice-item-quantity.is-invalid')?.focus();
+    });
     recalculateInvoiceTotals(form);
 });
 </script>

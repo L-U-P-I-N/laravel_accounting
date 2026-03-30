@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Invoice extends Model
 {
@@ -12,7 +14,11 @@ class Invoice extends Model
     protected $fillable = [
         'invoice_number',
         'customer_id',
+        'employee_id',
         'company_id',
+        'branch_id',
+        'sales_channel_id',
+        'payment_method_id',
         'invoice_date',
         'due_date',
         'subtotal',
@@ -39,19 +45,44 @@ class Invoice extends Model
         'exchange_rate' => 'decimal:4',
     ];
 
-    public function company()
+    public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
     }
 
-    public function customer()
+    public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
     }
 
-    public function items()
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class);
+    }
+
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
+    public function salesChannel(): BelongsTo
+    {
+        return $this->belongsTo(SalesChannel::class, 'sales_channel_id');
+    }
+
+    public function paymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(PaymentMethod::class);
+    }
+
+    public function items(): HasMany
     {
         return $this->hasMany(InvoiceItem::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
     }
 
     public function scopeForCompany($query, $companyId)

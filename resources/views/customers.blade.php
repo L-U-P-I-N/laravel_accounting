@@ -7,7 +7,6 @@
     $canManageCustomers = $currentUser?->hasPermission('manage_customers') ?? false;
     $canViewReports = $currentUser?->hasPermission('view_reports') ?? false;
     $customersReportUrl = route('reports', ['report_type' => 'receivables']);
-    $customersReportPrintUrl = route('reports', ['report_type' => 'receivables', 'print' => 1]);
     $companyCountryLabel = $companyCountry['name_ar'] ?? ($company->country_code ?? 'غير محدد');
     $selectedCustomerCityFilter = $customerFilters['city'] ?? '';
     $selectedCustomerStatusFilter = $customerFilters['status'] ?? '';
@@ -27,11 +26,8 @@
     </div>
     <div class="d-flex gap-2 flex-wrap">
         @if ($canViewReports)
-            <a href="{{ $customersReportUrl }}" target="_blank" class="btn btn-outline-primary">
-                <i class="fas fa-table ms-1"></i> معاينة التقرير
-            </a>
-            <a href="{{ $customersReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
-                <i class="fas fa-print ms-1"></i> طباعة / PDF
+            <a href="{{ $customersReportUrl }}" class="btn btn-outline-primary">
+                <i class="fas fa-chart-bar ms-1"></i> مركز التقارير
             </a>
         @endif
         @if ($canManageCustomers)
@@ -90,50 +86,6 @@
         </div>
     </form>
 </div>
-
-@if ($canViewReports)
-    <div class="list-card mb-4">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-            <div>
-                <h5 class="mb-1">تقرير العملاء</h5>
-                <p class="text-muted mb-0">اختر عميلًا محددًا أو فترة مخصصة لعرض الذمم المدينة من نفس الصفحة.</p>
-            </div>
-        </div>
-        <form method="GET" action="{{ route('reports') }}" target="_blank" class="row g-3 align-items-end">
-            <input type="hidden" name="report_type" value="receivables">
-            <div class="col-lg-3 col-md-6">
-                <label class="form-label">العميل</label>
-                <select name="customer_id" class="form-select">
-                    <option value="">كل العملاء</option>
-                    @foreach (($reportCustomers ?? $customers) as $customer)
-                        <option value="{{ $customer->id }}">{{ $customer->name }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">الفترة</label>
-                <select name="period" class="form-select">
-                    <option value="monthly">شهري</option>
-                    <option value="quarterly">ربع سنوي</option>
-                    <option value="yearly">سنوي</option>
-                    <option value="custom">مخصص</option>
-                </select>
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">من تاريخ</label>
-                <input type="date" name="date_from" class="form-control">
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">إلى تاريخ</label>
-                <input type="date" name="date_to" class="form-control">
-            </div>
-            <div class="col-lg-3 col-md-6 d-flex gap-2">
-                <button type="submit" class="btn btn-primary flex-fill"><i class="fas fa-chart-bar ms-1"></i>فتح التقرير</button>
-                <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill"><i class="fas fa-print ms-1"></i>طباعة</button>
-            </div>
-        </form>
-    </div>
-@endif
 
 @if ($customers->isNotEmpty())
     @foreach ($customers as $customer)

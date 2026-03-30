@@ -41,6 +41,7 @@ class InvoiceCrudTest extends TestCase
 
         $invoice = Invoice::firstOrFail();
         $this->assertSame('draft', $invoice->status);
+        $this->assertSame(5.0, (float) $product->fresh()->stock_quantity);
         $this->assertDatabaseCount('journal_entries', 0);
     }
 
@@ -64,6 +65,36 @@ class InvoiceCrudTest extends TestCase
         $this->expectException(ValidationException::class);
 
         app(AccountingPageController::class)->storeInvoice($request);
+    }
+
+    public function test_store_invoice_rejects_quantity_above_available_stock(): void
+    {
+        [$company, $user, $customer, $product] = $this->invoiceContext('sent-over-stock@example.com');
+
+        $request = Request::create('/invoices', 'POST', [
+            'customer_id' => $customer->id,
+            'invoice_date' => '2026-03-27',
+            'due_date' => '2026-04-27',
+            'status' => 'sent',
+            'item_product_id' => [$product->id],
+            'item_description' => ['Stock limited product'],
+            'item_quantity' => [6],
+            'item_price' => [25],
+            'item_tax_rate' => [15],
+        ]);
+        $request->setUserResolver(fn () => $user);
+
+        try {
+            app(AccountingPageController::class)->storeInvoice($request);
+            $this->fail('Expected stock validation to reject invoice creation.');
+        } catch (ValidationException $exception) {
+            $this->assertSame([
+                'الكمية المتاحة للمنتج "Product A" هي 5.00 فقط، بينما إجمالي الكمية المطلوبة 6.00.',
+            ], $exception->errors()['item_quantity.0'] ?? []);
+        }
+
+        $this->assertDatabaseCount('invoices', 0);
+        $this->assertSame(5.0, (float) $product->fresh()->stock_quantity);
     }
 
     public function test_send_invoice_creates_journal_entry_for_valid_draft(): void
@@ -94,6 +125,7 @@ class InvoiceCrudTest extends TestCase
 
         $invoice->refresh();
         $this->assertSame('sent', $invoice->status);
+        $this->assertSame(3.0, (float) $product->fresh()->stock_quantity);
         $this->assertDatabaseHas('journal_entries', [
             'source_type' => Invoice::class,
             'source_id' => $invoice->id,
@@ -150,6 +182,89 @@ class InvoiceCrudTest extends TestCase
         $entry = JournalEntry::with('lines')->where('source_type', Invoice::class)->where('source_id', $invoice->id)->firstOrFail();
 
         $this->assertTrue($entry->lines->contains(fn ($line) => (int) $line->account_id === (int) $customOutputVatAccount->id && (float) $line->credit === 7.5));
+    }
+
+    public function test_update_sent_invoice_rebalances_stock_for_changed_items(): void
+    {
+        [$company, $user, $customer, $product] = $this->invoiceContext('update-sent-invoice@example.com');
+
+        $storeRequest = Request::create('/invoices', 'POST', [
+            'customer_id' => $customer->id,
+            'invoice_date' => '2026-03-27',
+            'due_date' => '2026-04-27',
+            'status' => 'sent',
+            'item_product_id' => [$product->id],
+            'item_description' => ['Original product'],
+            'item_quantity' => [2],
+            'item_price' => [25],
+            'item_tax_rate' => [15],
+        ]);
+        $storeRequest->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->storeInvoice($storeRequest);
+
+        $invoice = Invoice::firstOrFail();
+
+        $updateRequest = Request::create('/invoices/' . $invoice->id, 'PUT', [
+            'customer_id' => $customer->id,
+            'invoice_date' => '2026-03-28',
+            'due_date' => '2026-04-28',
+            'status' => 'sent',
+            'item_product_id' => [$product->id],
+            'item_description' => ['Updated product'],
+            'item_quantity' => [1],
+            'item_price' => [25],
+            'item_tax_rate' => [15],
+        ]);
+        $updateRequest->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->updateInvoice($updateRequest, $invoice);
+
+        $invoice->refresh();
+
+        $this->assertSame('sent', $invoice->status);
+        $this->assertSame(4.0, (float) $product->fresh()->stock_quantity);
+        $this->assertSame(1.0, (float) $invoice->items()->firstOrFail()->quantity);
+        $this->assertDatabaseHas('journal_entries', [
+            'source_type' => Invoice::class,
+            'source_id' => $invoice->id,
+        ]);
+    }
+
+    public function test_destroy_sent_invoice_restores_stock_and_deletes_journal_entry(): void
+    {
+        [$company, $user, $customer, $product] = $this->invoiceContext('destroy-sent-invoice@example.com');
+
+        $storeRequest = Request::create('/invoices', 'POST', [
+            'customer_id' => $customer->id,
+            'invoice_date' => '2026-03-27',
+            'due_date' => '2026-04-27',
+            'status' => 'sent',
+            'item_product_id' => [$product->id],
+            'item_description' => ['Disposable product'],
+            'item_quantity' => [2],
+            'item_price' => [25],
+            'item_tax_rate' => [15],
+        ]);
+        $storeRequest->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->storeInvoice($storeRequest);
+
+        $invoice = Invoice::firstOrFail();
+
+        $destroyRequest = Request::create('/invoices/' . $invoice->id, 'DELETE');
+        $destroyRequest->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->destroyInvoice($destroyRequest, $invoice);
+
+        $this->assertSame(5.0, (float) $product->fresh()->stock_quantity);
+        $this->assertDatabaseMissing('invoices', [
+            'id' => $invoice->id,
+        ]);
+        $this->assertDatabaseMissing('journal_entries', [
+            'source_type' => Invoice::class,
+            'source_id' => $invoice->id,
+        ]);
     }
 
     private function invoiceContext(string $email): array

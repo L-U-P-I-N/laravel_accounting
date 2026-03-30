@@ -6,6 +6,17 @@ function toggleSidebar(forceState) {
         return;
     }
 
+    if (window.innerWidth > 991) {
+        sidebar.classList.remove('active');
+
+        if (overlay) {
+            overlay.classList.remove('active');
+        }
+
+        document.body.classList.remove('sidebar-open');
+        return;
+    }
+
     const shouldOpen = typeof forceState === 'boolean'
         ? forceState
         : !sidebar.classList.contains('active');

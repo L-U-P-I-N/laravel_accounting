@@ -13,7 +13,6 @@
         'date_to' => $filters['date_to'] !== '' ? $filters['date_to'] : null,
     ], fn ($value) => $value !== null && $value !== '');
     $journalEntriesReportUrl = route('reports', $journalReportParams);
-    $journalEntriesReportPrintUrl = route('reports', array_merge($journalReportParams, ['print' => 1]));
 @endphp
 
 @section('content')
@@ -24,11 +23,8 @@
     </div>
     <div class="d-flex gap-2 flex-wrap">
         @if ($canViewReports)
-            <a href="{{ $journalEntriesReportUrl }}" target="_blank" class="btn btn-outline-primary">
-                <i class="fas fa-table ms-1"></i> معاينة التقرير
-            </a>
-            <a href="{{ $journalEntriesReportPrintUrl }}" target="_blank" class="btn btn-outline-dark">
-                <i class="fas fa-print ms-1"></i> طباعة / PDF
+            <a href="{{ $journalEntriesReportUrl }}" class="btn btn-outline-primary">
+                <i class="fas fa-chart-bar ms-1"></i> مركز التقارير
             </a>
         @endif
         @if ($canManageJournalEntries)
@@ -84,52 +80,6 @@
         </div>
     </form>
 </div>
-
-@if ($canViewReports)
-    <div class="list-card mb-4">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-            <div>
-                <h5 class="mb-1">تقرير القيود والحسابات</h5>
-                <p class="text-muted mb-0">استخدم نفس الحساب والفترة المختارة لفتح تقرير أرصدة الحسابات أو طباعته مباشرة.</p>
-            </div>
-        </div>
-        <form method="GET" action="{{ route('reports') }}" target="_blank" class="row g-3 align-items-end">
-            <input type="hidden" name="report_type" value="account_balances">
-            <div class="col-lg-4 col-md-6">
-                <label class="form-label">الحساب</label>
-                <select class="form-select" name="account_id">
-                    <option value="">كل الحسابات</option>
-                    @foreach ($accounts as $account)
-                        <option value="{{ $account->id }}" {{ $filters['account_id'] === $account->id ? 'selected' : '' }}>
-                            {{ $account->code }} - {{ $account->name_ar ?? $account->name }}
-                        </option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">الفترة</label>
-                <select name="period" class="form-select">
-                    <option value="monthly" {{ $filters['date_from'] === '' && $filters['date_to'] === '' ? 'selected' : '' }}>شهري</option>
-                    <option value="quarterly">ربع سنوي</option>
-                    <option value="yearly">سنوي</option>
-                    <option value="custom" {{ $filters['date_from'] !== '' || $filters['date_to'] !== '' ? 'selected' : '' }}>مخصص</option>
-                </select>
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">من تاريخ</label>
-                <input type="date" class="form-control" name="date_from" value="{{ $filters['date_from'] }}">
-            </div>
-            <div class="col-lg-2 col-md-6">
-                <label class="form-label">إلى تاريخ</label>
-                <input type="date" class="form-control" name="date_to" value="{{ $filters['date_to'] }}">
-            </div>
-            <div class="col-lg-2 col-md-6 d-flex gap-2">
-                <button type="submit" class="btn btn-primary flex-fill">فتح التقرير</button>
-                <button type="submit" name="print" value="1" class="btn btn-outline-dark flex-fill">طباعة</button>
-            </div>
-        </form>
-    </div>
-@endif
 
 @if ($entries->isNotEmpty())
     @foreach ($entries as $entry)

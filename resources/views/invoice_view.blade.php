@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'عرض الفاتورة')
+@section('title', 'تفاصيل المبيعات')
 
 @php
     $canManageInvoices = auth()->user()->hasPermission('manage_invoices');
@@ -40,21 +40,18 @@
 @section('content')
 <div class="page-header">
     <div>
-        <h2 class="page-title"><i class="fas fa-eye"></i> عرض الفاتورة</h2>
-        <p class="text-muted mt-2 mb-0">تفاصيل الفاتورة {{ $invoice->invoice_number }}</p>
+        <h2 class="page-title"><i class="fas fa-eye"></i> تفاصيل المبيعات</h2>
+        <p class="text-muted mt-2 mb-0">تفاصيل عملية البيع {{ $invoice->invoice_number }}</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <a href="{{ route('invoices') }}" class="btn btn-outline-secondary">
-            <i class="fas fa-arrow-right ms-2"></i>العودة للفواتير
+            <i class="fas fa-arrow-right ms-2"></i>العودة للمبيعات
         </a>
         @if (!empty($journalEntry))
             <a href="{{ route('journal_entries.show', $journalEntry) }}" class="btn btn-outline-success">
                 <i class="fas fa-book ms-2"></i>عرض القيد المحاسبي
             </a>
         @endif
-        <button type="button" class="btn btn-primary btn-action" onclick="window.print()">
-            <i class="fas fa-print ms-2"></i>طباعة
-        </button>
     </div>
 </div>
 
@@ -70,7 +67,7 @@
                 @endif
             </div>
             <div class="col-md-6 text-start">
-                <h2 class="text-primary">فاتورة</h2>
+                <h2 class="text-primary">مبيعات</h2>
                 <h4>{{ $invoice->invoice_number }}</h4>
                 <p class="mb-1"><strong>التاريخ:</strong> {{ optional($invoice->invoice_date)->format('Y-m-d') }}</p>
                 @if ($invoice->due_date)
@@ -99,7 +96,7 @@
 
     <div class="row mb-4">
         <div class="col-md-6 mb-4 mb-md-0">
-            <h5>فاتورة لـ:</h5>
+            <h5>مبيعات إلى:</h5>
             <strong>{{ $invoice->customer?->name ?? 'عميل غير محدد' }}</strong><br>
             @if ($invoice->customer?->address)
                 {{ $invoice->customer->address }}<br>
@@ -177,15 +174,19 @@
                     <i class="fas fa-envelope ms-2"></i>إرسال بالبريد
                 </button>
                 @if ($canManageInvoices)
-                    <button type="button" class="btn btn-warning btn-action">
+                    <a href="{{ route('invoices.edit', $invoice) }}" class="btn btn-warning btn-action">
                         <i class="fas fa-edit ms-2"></i>تعديل
-                    </button>
+                    </a>
+                    <form method="POST" action="{{ route('invoices.destroy', $invoice) }}" onsubmit="return confirm('سيتم حذف الفاتورة وعكس المخزون والقيد المحاسبي المرتبط بها. هل تريد المتابعة؟');">
+                        @csrf
+                        @method('DELETE')
+                        <button type="submit" class="btn btn-danger btn-action" {{ (float) $invoice->paid_amount > 0 ? 'disabled' : '' }}>
+                            <i class="fas fa-trash ms-2"></i>حذف
+                        </button>
+                    </form>
                 @endif
-                <button type="button" class="btn btn-primary btn-action" onclick="window.print()">
-                    <i class="fas fa-print ms-2"></i>طباعة
-                </button>
-                <a href="{{ route('invoices.pdf', $invoice) }}" class="btn btn-danger btn-action">
-                    <i class="fas fa-file-pdf ms-2"></i>تصدير PDF
+                <a href="{{ route('reports', ['report_type' => 'receivables', 'customer_id' => $invoice->customer_id]) }}" class="btn btn-primary btn-action">
+                    <i class="fas fa-chart-bar ms-2"></i>مركز التقارير
                 </a>
             </div>
         </div>
