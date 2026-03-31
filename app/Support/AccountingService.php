@@ -6,6 +6,8 @@ use App\Models\Account;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\JournalEntry;
+use App\Models\PaymentMethod;
+use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\Supplier;
 use App\Models\TaxSetting;
@@ -18,65 +20,98 @@ class AccountingService
 {
     public function __construct(
         private readonly DocumentNumberGenerator $documentNumberGenerator,
+        private readonly ChartOfAccountsSynchronizer $chartOfAccountsSynchronizer,
     ) {
     }
 
     public function syncInvoiceEntry(Invoice $invoice, User $user): JournalEntry
     {
-        $invoice->loadMissing(['items.product', 'customer']);
+        $invoice->loadMissing(['items.product', 'customer.account', 'paymentMethod']);
 
-        $salesAmount = 0;
-        $serviceAmount = 0;
+        $lines = collect();
+        $paidAmount = $this->normalizeAmount(min((float) $invoice->paid_amount, (float) $invoice->total));
+        $receivableAmount = $this->normalizeAmount(max((float) $invoice->total - $paidAmount, 0));
+
+        if ($paidAmount > 0) {
+            $this->pushLine(
+                $lines,
+                $this->paymentAccountFromMethod((int) $invoice->company_id, $invoice->paymentMethod),
+                'إثبات المقبوض من الفاتورة ' . $invoice->invoice_number,
+                $paidAmount,
+                0,
+            );
+        }
+
+        if ($receivableAmount > 0) {
+            $this->pushLine(
+                $lines,
+                $this->customerReceivableAccount($invoice),
+                'إثبات ذمة العميل للفاتورة ' . $invoice->invoice_number,
+                $receivableAmount,
+                0,
+            );
+        }
+
+        $inventoryCreditTotal = 0.0;
+        $cogsDebitTotal = 0.0;
 
         foreach ($invoice->items as $item) {
-            $lineNet = round((float) $item->total - (float) $item->tax_amount, 2);
-            $productType = $item->product?->type;
+            $lineNet = $this->normalizeAmount((float) $item->total - (float) $item->tax_amount);
 
-            if ($productType === 'service') {
-                $serviceAmount += $lineNet;
-            } else {
-                $salesAmount += $lineNet;
+            if ($lineNet > 0) {
+                $this->pushLine(
+                    $lines,
+                    $this->revenueAccountForProduct($item->product, (int) $invoice->company_id),
+                    'إثبات الإيراد للفاتورة ' . $invoice->invoice_number,
+                    0,
+                    $lineNet,
+                );
+            }
+
+            if ($item->product?->type === 'product') {
+                $lineCost = $this->normalizeAmount((float) $item->quantity * (float) $item->product->cost_price);
+
+                if ($lineCost > 0) {
+                    $this->pushLine(
+                        $lines,
+                        $this->cogsAccountForProduct($item->product, (int) $invoice->company_id),
+                        'إثبات تكلفة البضاعة المباعة للفاتورة ' . $invoice->invoice_number,
+                        $lineCost,
+                        0,
+                    );
+
+                    $this->pushLine(
+                        $lines,
+                        $this->inventoryAccountForProduct($item->product, (int) $invoice->company_id),
+                        'تخفيض المخزون للفاتورة ' . $invoice->invoice_number,
+                        0,
+                        $lineCost,
+                    );
+
+                    $inventoryCreditTotal += $lineCost;
+                    $cogsDebitTotal += $lineCost;
+                }
             }
         }
 
-        if ($salesAmount <= 0 && $serviceAmount <= 0 && (float) $invoice->subtotal > 0) {
-            $salesAmount = round((float) $invoice->subtotal, 2);
-        }
-
-        $lines = collect([
-            [
-                'account' => $this->receivablesAccount((int) $invoice->company_id),
-                'description' => 'إثبات ذمة العميل للفاتورة ' . $invoice->invoice_number,
-                'debit' => round((float) $invoice->total, 2),
-                'credit' => 0,
-            ],
-        ]);
-
-        if ($salesAmount > 0) {
-            $lines->push([
-                'account' => $this->salesRevenueAccount((int) $invoice->company_id),
-                'description' => 'إثبات إيراد مبيعات الفاتورة ' . $invoice->invoice_number,
-                'debit' => 0,
-                'credit' => round($salesAmount, 2),
-            ]);
-        }
-
-        if ($serviceAmount > 0) {
-            $lines->push([
-                'account' => $this->serviceRevenueAccount((int) $invoice->company_id),
-                'description' => 'إثبات إيراد خدمات الفاتورة ' . $invoice->invoice_number,
-                'debit' => 0,
-                'credit' => round($serviceAmount, 2),
-            ]);
+        if ($lines->where('credit', '>', 0)->isEmpty() && (float) $invoice->subtotal > 0) {
+            $this->pushLine(
+                $lines,
+                $this->salesRevenueAccount((int) $invoice->company_id),
+                'إثبات إيراد مبيعات الفاتورة ' . $invoice->invoice_number,
+                0,
+                $this->normalizeAmount((float) $invoice->subtotal),
+            );
         }
 
         if ((float) $invoice->tax_amount > 0) {
-            $lines->push([
-                'account' => $this->outputVatAccount((int) $invoice->company_id),
-                'description' => 'ضريبة المخرجات للفاتورة ' . $invoice->invoice_number,
-                'debit' => 0,
-                'credit' => round((float) $invoice->tax_amount, 2),
-            ]);
+            $this->pushLine(
+                $lines,
+                $this->outputVatAccount((int) $invoice->company_id),
+                'ضريبة المخرجات للفاتورة ' . $invoice->invoice_number,
+                0,
+                $this->normalizeAmount((float) $invoice->tax_amount),
+            );
         }
 
         return $this->syncJournalEntry(
@@ -93,61 +128,78 @@ class AccountingService
 
     public function syncPurchaseEntry(Purchase $purchase, User $user): JournalEntry
     {
-        $purchase->loadMissing(['items.product', 'supplier']);
-
-        $inventoryAmount = 0;
-        $expenseAmount = 0;
-
-        foreach ($purchase->items as $item) {
-            $lineNet = round((float) $item->total - (float) $item->tax_amount, 2);
-            $productType = $item->product?->type;
-
-            if ($productType === 'service' || $item->product_id === null) {
-                $expenseAmount += $lineNet;
-            } else {
-                $inventoryAmount += $lineNet;
-            }
-        }
-
-        if ($inventoryAmount <= 0 && $expenseAmount <= 0 && (float) $purchase->subtotal > 0) {
-            $inventoryAmount = round((float) $purchase->subtotal, 2);
-        }
+        $purchase->loadMissing(['items.product', 'supplier.account', 'paymentMethod']);
 
         $lines = collect();
 
-        if ($inventoryAmount > 0) {
-            $lines->push([
-                'account' => $this->inventoryAccount((int) $purchase->company_id),
-                'description' => 'إثبات قيمة المخزون لطلب الشراء ' . $purchase->purchase_number,
-                'debit' => round($inventoryAmount, 2),
-                'credit' => 0,
-            ]);
+        foreach ($purchase->items as $item) {
+            $lineNet = $this->normalizeAmount((float) $item->total - (float) $item->tax_amount);
+
+            if ($lineNet <= 0) {
+                continue;
+            }
+
+            if ($item->product?->type === 'product') {
+                $this->pushLine(
+                    $lines,
+                    $this->inventoryAccountForProduct($item->product, (int) $purchase->company_id),
+                    'إثبات قيمة المخزون لطلب الشراء ' . $purchase->purchase_number,
+                    $lineNet,
+                    0,
+                );
+            } else {
+                $this->pushLine(
+                    $lines,
+                    $this->miscExpenseAccount((int) $purchase->company_id),
+                    'إثبات قيمة الخدمات أو المصروفات في طلب الشراء ' . $purchase->purchase_number,
+                    $lineNet,
+                    0,
+                );
+            }
         }
 
-        if ($expenseAmount > 0) {
-            $lines->push([
-                'account' => $this->miscExpenseAccount((int) $purchase->company_id),
-                'description' => 'إثبات قيمة الخدمات أو المصروفات في طلب الشراء ' . $purchase->purchase_number,
-                'debit' => round($expenseAmount, 2),
-                'credit' => 0,
-            ]);
+        if ($lines->where('debit', '>', 0)->isEmpty() && (float) $purchase->subtotal > 0) {
+            $this->pushLine(
+                $lines,
+                $this->inventoryAccount((int) $purchase->company_id),
+                'إثبات قيمة المخزون لطلب الشراء ' . $purchase->purchase_number,
+                $this->normalizeAmount((float) $purchase->subtotal),
+                0,
+            );
         }
 
         if ((float) $purchase->tax_amount > 0) {
-            $lines->push([
-                'account' => $this->inputVatAccount((int) $purchase->company_id),
-                'description' => 'ضريبة المدخلات لطلب الشراء ' . $purchase->purchase_number,
-                'debit' => round((float) $purchase->tax_amount, 2),
-                'credit' => 0,
-            ]);
+            $this->pushLine(
+                $lines,
+                $this->inputVatAccount((int) $purchase->company_id),
+                'ضريبة المدخلات لطلب الشراء ' . $purchase->purchase_number,
+                $this->normalizeAmount((float) $purchase->tax_amount),
+                0,
+            );
         }
 
-        $lines->push([
-            'account' => $this->payablesAccount((int) $purchase->company_id),
-            'description' => 'إثبات التزام المورد ' . ($purchase->supplier?->name ?? ''),
-            'debit' => 0,
-            'credit' => round((float) $purchase->total, 2),
-        ]);
+        $paidAmount = $this->normalizeAmount(min((float) $purchase->paid_amount, (float) $purchase->total));
+        $supplierDue = $this->normalizeAmount(max((float) $purchase->total - $paidAmount, 0));
+
+        if ($paidAmount > 0) {
+            $this->pushLine(
+                $lines,
+                $this->paymentAccountFromMethod((int) $purchase->company_id, $purchase->paymentMethod),
+                'السداد المباشر لطلب الشراء ' . $purchase->purchase_number,
+                0,
+                $paidAmount,
+            );
+        }
+
+        if ($supplierDue > 0) {
+            $this->pushLine(
+                $lines,
+                $this->supplierPayableAccount($purchase),
+                'إثبات التزام المورد ' . ($purchase->supplier?->name ?? ''),
+                0,
+                $supplierDue,
+            );
+        }
 
         return $this->syncJournalEntry(
             companyId: (int) $purchase->company_id,
@@ -204,17 +256,17 @@ class AccountingService
 
     public function createSupplierPaymentEntry(Supplier $supplier, float $paymentAmount, User $user, string $reference): JournalEntry
     {
-        $supplier->loadMissing('company');
+        $supplier->loadMissing(['company', 'account']);
 
         $lines = collect([
             [
-                'account' => $this->payablesAccount((int) $supplier->company_id),
+                'account' => $this->supplierAccount($supplier),
                 'description' => 'تخفيض ذمم المورد ' . $supplier->name,
                 'debit' => round($paymentAmount, 2),
                 'credit' => 0,
             ],
             [
-                'account' => $this->bankAccount((int) $supplier->company_id),
+                'account' => $this->defaultSettlementAccount((int) $supplier->company_id),
                 'description' => 'سداد دفعة للمورد ' . $supplier->name,
                 'debit' => 0,
                 'credit' => round($paymentAmount, 2),
@@ -297,6 +349,44 @@ class AccountingService
     public function nextJournalEntryNumber(int $companyId): string
     {
         return $this->documentNumberGenerator->nextJournalEntryNumber($companyId);
+    }
+
+    public function resyncCompanyTransactions(\App\Models\Company $company, User $user): array
+    {
+        $summary = [
+            'invoices' => 0,
+            'purchases' => 0,
+            'expenses' => 0,
+        ];
+
+        Invoice::with(['items.product', 'customer.account', 'paymentMethod'])
+            ->where('company_id', $company->id)
+            ->orderBy('id')
+            ->get()
+            ->each(function (Invoice $invoice) use ($user, &$summary) {
+                $this->syncInvoiceEntry($invoice, $user);
+                $summary['invoices']++;
+            });
+
+        Purchase::with(['items.product', 'supplier.account', 'paymentMethod'])
+            ->where('company_id', $company->id)
+            ->orderBy('id')
+            ->get()
+            ->each(function (Purchase $purchase) use ($user, &$summary) {
+                $this->syncPurchaseEntry($purchase, $user);
+                $summary['purchases']++;
+            });
+
+        Expense::with(['expenseAccount', 'paymentAccount'])
+            ->where('company_id', $company->id)
+            ->orderBy('id')
+            ->get()
+            ->each(function (Expense $expense) use ($user, &$summary) {
+                $this->syncExpenseEntry($expense, $user);
+                $summary['expenses']++;
+            });
+
+        return $summary;
     }
 
     private function syncJournalEntry(int $companyId, User $user, Model $source, string $entryType, string $description, ?string $reference, mixed $entryDate, Collection $lines): JournalEntry
@@ -427,17 +517,22 @@ class AccountingService
 
     private function receivablesAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '1200', 'الذمم المدينة', 'asset', '1000', ['ذمم مدينة', 'حسابات المدينين', 'Receivable', 'Debtor']);
+        return $this->resolveConceptAccount($companyId, '1.3', 'العملاء', 'asset', '1', ['العملاء', 'ذمم مدينة', 'حسابات المدينين', 'Customers', 'Receivable', 'Debtor']);
+    }
+
+    private function cashAccount(int $companyId): Account
+    {
+        return $this->resolveConceptAccount($companyId, '1.1', 'الصندوق', 'asset', '1', ['الصندوق', 'Cash']);
     }
 
     private function inventoryAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '1300', 'المخزون', 'asset', '1000', ['المخزون', 'Inventory']);
+        return $this->resolveConceptAccount($companyId, '1.4', 'المخزون', 'asset', '1', ['المخزون', 'Inventory']);
     }
 
     private function payablesAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '2100', 'الذمم الدائنة', 'liability', '2000', ['ذمم دائنة', 'حسابات الدائنين', 'Accounts Payable', 'Payable']);
+        return $this->resolveConceptAccount($companyId, '2.1', 'الموردين', 'liability', '2', ['الموردين', 'ذمم دائنة', 'حسابات الدائنين', 'Suppliers', 'Accounts Payable', 'Payable']);
     }
 
     private function inputVatAccount(int $companyId): Account
@@ -448,7 +543,7 @@ class AccountingService
             return $configuredAccount;
         }
 
-        return $this->resolveConceptAccount($companyId, '2310', 'ضريبة المدخلات', 'asset', '1000', ['ضريبة المدخلات', 'Input VAT']);
+        return $this->resolveConceptAccount($companyId, '1.5', 'ضريبة المدخلات', 'asset', '1', ['ضريبة المدخلات', 'Input VAT']);
     }
 
     private function outputVatAccount(int $companyId): Account
@@ -459,7 +554,7 @@ class AccountingService
             return $configuredAccount;
         }
 
-        return $this->resolveConceptAccount($companyId, '2300', 'ضريبة القيمة المضافة المستحقة', 'liability', '2000', ['ضريبة القيمة المضافة المستحقة', 'VAT Payable']);
+        return $this->resolveConceptAccount($companyId, '2.3', 'ضريبة المخرجات', 'liability', '2', ['ضريبة المخرجات', 'ضريبة القيمة المضافة المستحقة', 'Output VAT', 'VAT Payable']);
     }
 
     private function configuredTaxAccount(int $companyId, array $taxTypes): ?Account
@@ -480,22 +575,146 @@ class AccountingService
 
     private function salesRevenueAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '4100', 'إيرادات المبيعات', 'revenue', '4000', ['إيرادات المبيعات', 'المبيعات', 'Sales Revenue', 'Sales']);
+        return $this->resolveConceptAccount($companyId, '3.1', 'مبيعات', 'revenue', '3', ['مبيعات', 'إيرادات المبيعات', 'Sales Revenue', 'Sales']);
     }
 
     private function serviceRevenueAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '4200', 'إيرادات الخدمات', 'revenue', '4000', ['إيرادات الخدمات', 'مبيعات الخدمات', 'Service Revenue', 'Service']);
+        return $this->resolveConceptAccount($companyId, '3.1', 'مبيعات', 'revenue', '3', ['إيرادات الخدمات', 'مبيعات الخدمات', 'مبيعات', 'Service Revenue', 'Sales']);
     }
 
     private function miscExpenseAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '6900', 'مصروفات متنوعة', 'expense', '6000', ['مصروفات متنوعة', 'مصاريف إدارية وعامة', 'Miscellaneous', 'General Expense']);
+        return $this->resolveConceptAccount($companyId, '4.3', 'مصروفات متنوعة', 'expense', '4', ['مصروفات متنوعة', 'مصاريف إدارية وعامة', 'Miscellaneous', 'General Expense']);
+    }
+
+    private function cogsAccount(int $companyId): Account
+    {
+        return $this->resolveConceptAccount($companyId, '4.4', 'تكلفة البضاعة المباعة', 'cogs', '4', ['تكلفة البضاعة المباعة', 'Cost of Goods Sold', 'COGS']);
     }
 
     private function bankAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '1102', 'الحساب البنكي', 'asset', '1100', ['الحساب البنكي', 'الحسابات الجارية البنكية', 'Bank Account', 'Bank']);
+        return $this->resolveConceptAccount($companyId, '1.2', 'البنك', 'asset', '1', ['البنك', 'الحساب البنكي', 'الحسابات الجارية البنكية', 'Bank Account', 'Bank']);
+    }
+
+    private function customerReceivableAccount(Invoice $invoice): Account
+    {
+        if (! $invoice->customer) {
+            return $this->receivablesAccount((int) $invoice->company_id);
+        }
+
+        $customer = $invoice->customer;
+
+        if (! $customer->account_id) {
+            return $this->chartOfAccountsSynchronizer->syncCustomerAccount($customer);
+        }
+
+        return $this->accountForCompany((int) $invoice->company_id, (int) $customer->account_id);
+    }
+
+    private function supplierPayableAccount(Purchase $purchase): Account
+    {
+        if (! $purchase->supplier) {
+            return $this->payablesAccount((int) $purchase->company_id);
+        }
+
+        return $this->supplierAccount($purchase->supplier);
+    }
+
+    private function supplierAccount(Supplier $supplier): Account
+    {
+        if (! $supplier->account_id) {
+            return $this->chartOfAccountsSynchronizer->syncSupplierAccount($supplier);
+        }
+
+        return $this->accountForCompany((int) $supplier->company_id, (int) $supplier->account_id);
+    }
+
+    private function revenueAccountForProduct(?Product $product, int $companyId): Account
+    {
+        if (! $product) {
+            return $this->salesRevenueAccount($companyId);
+        }
+
+        if (! $product->revenue_account_id) {
+            $product = $this->chartOfAccountsSynchronizer->syncProductAccounts($product);
+        }
+
+        return $product->revenue_account_id
+            ? $this->accountForCompany($companyId, (int) $product->revenue_account_id)
+            : ($product->type === 'service' ? $this->serviceRevenueAccount($companyId) : $this->salesRevenueAccount($companyId));
+    }
+
+    private function inventoryAccountForProduct(?Product $product, int $companyId): Account
+    {
+        if (! $product || $product->type !== 'product') {
+            return $this->inventoryAccount($companyId);
+        }
+
+        if (! $product->inventory_account_id) {
+            $product = $this->chartOfAccountsSynchronizer->syncProductAccounts($product);
+        }
+
+        return $product->inventory_account_id
+            ? $this->accountForCompany($companyId, (int) $product->inventory_account_id)
+            : $this->inventoryAccount($companyId);
+    }
+
+    private function cogsAccountForProduct(?Product $product, int $companyId): Account
+    {
+        if (! $product || $product->type !== 'product') {
+            return $this->cogsAccount($companyId);
+        }
+
+        if (! $product->cogs_account_id) {
+            $product = $this->chartOfAccountsSynchronizer->syncProductAccounts($product);
+        }
+
+        return $product->cogs_account_id
+            ? $this->accountForCompany($companyId, (int) $product->cogs_account_id)
+            : $this->cogsAccount($companyId);
+    }
+
+    private function defaultSettlementAccount(int $companyId): Account
+    {
+        $paymentMethod = PaymentMethod::where('company_id', $companyId)
+            ->orderByDesc('is_default')
+            ->orderBy('id')
+            ->first();
+
+        return $this->paymentAccountFromMethod($companyId, $paymentMethod);
+    }
+
+    private function paymentAccountFromMethod(int $companyId, ?PaymentMethod $paymentMethod): Account
+    {
+        if ($paymentMethod?->type === 'cash') {
+            return $this->cashAccount($companyId);
+        }
+
+        return $this->bankAccount($companyId);
+    }
+
+    private function pushLine(Collection $lines, Account $account, string $description, float $debit, float $credit): void
+    {
+        $debit = $this->normalizeAmount($debit);
+        $credit = $this->normalizeAmount($credit);
+
+        if ($debit <= 0 && $credit <= 0) {
+            return;
+        }
+
+        $lines->push([
+            'account' => $account,
+            'description' => $description,
+            'debit' => $debit,
+            'credit' => $credit,
+        ]);
+    }
+
+    private function normalizeAmount(float $amount): float
+    {
+        return round($amount, 2);
     }
 
     private function resolveConceptAccount(int $companyId, string $fallbackCode, string $nameAr, string $type, ?string $parentCode, array $nameFragments): Account

@@ -21,6 +21,7 @@ class Supplier extends Model
         'city',
         'country',
         'tax_number',
+        'account_id',
         'credit_limit',
         'balance',
         'is_active',
@@ -35,6 +36,11 @@ class Supplier extends Model
     public function company()
     {
         return $this->belongsTo(Company::class);
+    }
+
+    public function account()
+    {
+        return $this->belongsTo(Account::class);
     }
 
     public function purchases()

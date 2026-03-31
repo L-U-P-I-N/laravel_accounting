@@ -19,149 +19,456 @@
 
 @push('styles')
 <style>
-.account-tree {
-    background: white;
-    border-radius: 15px;
-    padding: 25px;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+
+.coa-page {
+    --coa-asset: #1e7a63;
+    --coa-liability: #b24a62;
+    --coa-equity: #315ccf;
+    --coa-revenue: #25836a;
+    --coa-expense: #cc6a1b;
+    --coa-cogs: #6a4cc2;
+    --coa-surface: rgba(255, 255, 255, 0.92);
+    --coa-surface-strong: #ffffff;
+    --coa-muted-surface: #f7f3ea;
+    --coa-border: rgba(71, 85, 105, 0.12);
+    --coa-text-main: #132238;
+    --coa-text-soft: #667085;
+    --coa-shadow: 0 20px 50px rgba(15, 23, 42, 0.07);
+    --coa-shadow-soft: 0 10px 28px rgba(15, 23, 42, 0.05);
+    --coa-radius-lg: 30px;
+    --coa-radius-md: 24px;
+    --coa-radius-sm: 18px;
+    font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
+    color: var(--coa-text-main);
 }
 
-.account-item {
-    border: 1px solid #e0e0e0;
-    border-radius: 10px;
-    padding: 15px;
-    margin-bottom: 10px;
-    transition: all 0.3s ease;
+.coa-page .btn {
+    border-radius: 14px;
+    font-weight: 700;
+    padding: 0.72rem 1rem;
 }
 
-.account-item:hover {
-    background: #f8f9fa;
-    transform: translateX(5px);
+.coa-page .btn-sm {
+    padding: 0.5rem 0.8rem;
 }
 
-.account-item.parent {
-    background: linear-gradient(45deg, #f8f9fa, #e9ecef);
-    border-left: 4px solid #667eea;
+.coa-page .form-control,
+.coa-page .form-select,
+.coa-page .input-group-text {
+    border-radius: 14px;
+    border-color: rgba(148, 163, 184, 0.28);
+    min-height: 48px;
+    font-size: 0.98rem;
 }
 
-.account-type-badge {
-    padding: 5px 15px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: bold;
+.coa-page .form-control,
+.coa-page .form-select {
+    color: var(--coa-text-main);
+    box-shadow: none;
 }
 
-.asset { background: #28a745; color: white; }
-.liability { background: #dc3545; color: white; }
-.equity { background: #007bff; color: white; }
-.revenue { background: #20c997; color: white; }
-.expense { background: #fd7e14; color: white; }
-.cogs { background: #6f42c1; color: white; }
+.coa-page .form-control:focus,
+.coa-page .form-select:focus {
+    border-color: rgba(49, 92, 207, 0.42);
+    box-shadow: 0 0 0 0.2rem rgba(49, 92, 207, 0.09);
+}
 
-.filter-card {
-    background: #fff;
-    border-radius: 15px;
-    padding: 20px;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+.coa-page .input-group-text {
+    background: #fbfcfe;
+    color: var(--coa-text-soft);
+}
+
+.coa-page .badge {
+    border-radius: 999px;
+    padding: 0.55rem 0.85rem;
+    font-weight: 700;
+}
+
+.coa-hero {
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at top left, rgba(37, 131, 106, 0.16), transparent 34%),
+        radial-gradient(circle at top right, rgba(49, 92, 207, 0.15), transparent 30%),
+        linear-gradient(135deg, #faf6ee 0%, #fffefb 52%, #eef4ff 100%);
+    border: 1px solid var(--coa-border);
+    border-radius: var(--coa-radius-lg);
+    padding: 34px;
+    box-shadow: var(--coa-shadow);
+}
+
+.coa-hero::after {
+    content: '';
+    position: absolute;
+    inset: auto -60px -80px auto;
+    width: 240px;
+    height: 240px;
+    border-radius: 50%;
+    background: rgba(37, 131, 106, 0.08);
+    filter: blur(12px);
+}
+
+.coa-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(37, 131, 106, 0.18);
+    color: #14532d;
+    font-size: 0.92rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.coa-hero-title {
+    font-size: clamp(1.9rem, 1.55rem + 1vw, 2.65rem);
+    font-weight: 800;
+    line-height: 1.35;
+    margin: 16px 0 10px;
+    color: var(--coa-text-main);
+}
+
+.coa-hero-text {
+    max-width: 760px;
+    color: var(--coa-text-soft);
+    font-size: 1.02rem;
+    line-height: 1.95;
+    margin: 0;
+}
+
+.coa-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.coa-snapshot-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.coa-snapshot-card {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(250, 248, 243, 0.94) 100%);
+    border: 1px solid var(--coa-border);
+    border-radius: var(--coa-radius-sm);
+    padding: 20px 18px;
+    box-shadow: var(--coa-shadow-soft);
+}
+
+.coa-snapshot-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+}
+
+.coa-type-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 13px;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 0.82rem;
+    font-weight: 700;
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.coa-type-pill.asset, .coa-type-dot.asset { background: var(--coa-asset); }
+.coa-type-pill.liability, .coa-type-dot.liability { background: var(--coa-liability); }
+.coa-type-pill.equity, .coa-type-dot.equity { background: var(--coa-equity); }
+.coa-type-pill.revenue, .coa-type-dot.revenue { background: var(--coa-revenue); }
+.coa-type-pill.expense, .coa-type-dot.expense { background: var(--coa-expense); }
+.coa-type-pill.cogs, .coa-type-dot.cogs { background: var(--coa-cogs); }
+
+.coa-type-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.coa-snapshot-card h4 {
+    margin: 0;
+    font-size: 2.15rem;
+    font-weight: 800;
+    color: var(--coa-text-main);
+}
+
+.coa-snapshot-card p {
+    margin: 10px 0 0;
+    color: var(--coa-text-soft);
+    font-size: 0.92rem;
+    line-height: 1.7;
+}
+
+.coa-filter-panel,
+.coa-tree-shell {
+    background: var(--coa-surface);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--coa-border);
+    border-radius: var(--coa-radius-md);
+    box-shadow: var(--coa-shadow);
+}
+
+.coa-filter-panel {
+    padding: 24px;
+}
+
+.coa-filter-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.coa-filter-title {
+    font-weight: 800;
+    font-size: 1.22rem;
+    margin: 0;
+    color: var(--coa-text-main);
+}
+
+.coa-filter-subtitle {
+    margin: 8px 0 0;
+    color: var(--coa-text-soft);
+    line-height: 1.8;
+}
+
+.coa-filter-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.coa-tree-shell {
+    padding: 26px;
+    background:
+        linear-gradient(180deg, #fffdf8 0%, #ffffff 100%);
+}
+
+.coa-tree-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.coa-tree-title {
+    margin: 0;
+    font-size: 1.26rem;
+    font-weight: 800;
+    color: var(--coa-text-main);
+}
+
+.coa-tree-subtitle {
+    margin: 8px 0 0;
+    color: var(--coa-text-soft);
+    line-height: 1.8;
+}
+
+.coa-tree-toolbar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.coa-tree-canvas {
+    position: relative;
+}
+
+.coa-empty-state {
+    padding: 64px 22px;
+    text-align: center;
+    border: 1px dashed rgba(107, 114, 128, 0.35);
+    border-radius: var(--coa-radius-sm);
+    background: linear-gradient(180deg, #fbfcfe 0%, #f9f6ef 100%);
+    color: var(--coa-text-soft);
+}
+
+.coa-empty-state i {
+    font-size: 2.4rem;
+    margin-bottom: 14px;
+    color: #9ca3af;
+}
+
+@media (max-width: 1199.98px) {
+    .coa-snapshot-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 767.98px) {
+    .coa-hero {
+        padding: 24px;
+    }
+
+    .coa-hero-actions,
+    .coa-filter-actions,
+    .coa-tree-header,
+    .coa-filter-header {
+        justify-content: flex-start;
+    }
+
+    .coa-snapshot-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .coa-tree-shell,
+    .coa-filter-panel {
+        padding: 18px;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .coa-snapshot-grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
 @endpush
 
 @section('content')
-<div class="page-header">
-    <div>
-        <h2 class="page-title"><i class="fas fa-sitemap"></i> شجرة الحسابات</h2>
-        <p class="text-muted mt-2 mb-0">إدارة الحسابات المحاسبية</p>
-    </div>
-    <div class="d-flex gap-2 flex-wrap">
-        @if ($canViewReports)
-            <a href="{{ $accountsReportUrl }}" class="btn btn-outline-primary">
-                <i class="fas fa-chart-bar ms-1"></i> مركز التقارير
-            </a>
-        @endif
-        @if ($canManageAccounts)
-            <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addAccountModal">
-                <i class="fas fa-plus ms-1"></i> إضافة حساب جديد
-            </button>
-        @endif
-    </div>
-</div>
-
-<div class="row mb-4">
-    <div class="col-12 mb-3">
-        <div class="filter-card">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                <div>
-                    <h5 class="mb-1">البحث والفلترة</h5>
-                    <p class="text-muted mb-0">ابحث عن حساب بالاسم أو الكود، وفلتر حسب النوع أو نطاق الرصيد.</p>
-                </div>
-                @if ($hasAccountFilters)
-                    <span class="badge text-bg-primary">{{ $matchingAccounts->count() }} نتيجة مطابقة</span>
-                @endif
+<div class="coa-page">
+    <section class="coa-hero mb-4">
+        <div class="row align-items-center g-4">
+            <div class="col-lg-8">
+                <span class="coa-eyebrow"><i class="fas fa-sitemap"></i> دليل الشركة المحاسبي</span>
+                <h1 class="coa-hero-title">شجرة الحسابات بشكل بصري أوضح وأكثر قابلية للتصفح</h1>
+                <p class="coa-hero-text">
+                    استعرض الجذور والفروع والحسابات التابعة بطريقة هرمية مباشرة، مع فلترة سريعة وإحصاءات تساعدك على فهم توزيع الحسابات داخل الشركة بدون ازدحام بصري.
+                </p>
             </div>
+            <div class="col-lg-4">
+                <div class="coa-hero-actions">
+                    @if ($canViewReports)
+                        <a href="{{ $accountsReportUrl }}" class="btn btn-outline-primary">
+                            <i class="fas fa-chart-column ms-1"></i> مركز التقارير
+                        </a>
+                    @endif
+                    @if ($canManageAccounts)
+                        <form method="POST" action="{{ route('chart_of_accounts.resync') }}">
+                            @csrf
+                            <button type="submit" class="btn btn-outline-secondary" onclick="return confirm('سيتم تحديث الشجرة والحسابات المرتبطة وإعادة توليد القيود الآلية الحالية. هل تريد المتابعة؟');">
+                                <i class="fas fa-rotate ms-1"></i> إعادة مزامنة المحاسبة
+                            </button>
+                        </form>
+                        <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addAccountModal">
+                            <i class="fas fa-plus ms-1"></i> إضافة حساب جديد
+                        </button>
+                    @endif
+                </div>
+            </div>
+        </div>
+    </section>
 
-            <form method="GET" action="{{ route('chart_of_accounts') }}" class="row g-3">
-                <div class="col-md-4">
-                    <label class="form-label">بحث عن حساب</label>
+    <section class="coa-snapshot-grid mb-4">
+        @foreach (['asset' => 'أصول', 'liability' => 'خصوم', 'equity' => 'ملكية', 'revenue' => 'إيرادات', 'expense' => 'مصروفات', 'cogs' => 'تكلفة'] as $type => $label)
+            <article class="coa-snapshot-card">
+                <div class="coa-snapshot-top">
+                    <span class="coa-type-pill {{ $type }}">{{ $label }}</span>
+                    <i class="fas fa-layer-group text-muted"></i>
+                </div>
+                <h4>{{ $accountStats->where('account_type', $type)->count() }}</h4>
+                <p>عدد الحسابات ضمن هذا التصنيف بعد تطبيق الفلاتر الحالية.</p>
+            </article>
+        @endforeach
+    </section>
+
+    <section class="coa-filter-panel mb-4">
+        <div class="coa-filter-header">
+            <div>
+                <h2 class="coa-filter-title">البحث والفلترة</h2>
+                <p class="coa-filter-subtitle">اعثر على أي حساب بالاسم أو الكود، وضيّق الشجرة حسب النوع أو الرصيد لقراءة أسهل.</p>
+            </div>
+            <div class="coa-filter-actions">
+                @if ($hasAccountFilters)
+                    <span class="badge text-bg-primary align-self-start">{{ $matchingAccounts->count() }} نتيجة مطابقة</span>
+                @endif
+                <a href="{{ route('chart_of_accounts') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-undo ms-1"></i> مسح الفلاتر
+                </a>
+            </div>
+        </div>
+
+        <form method="GET" action="{{ route('chart_of_accounts') }}" class="row g-3">
+            <div class="col-lg-4 col-md-6">
+                <label class="form-label">بحث عن حساب</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="fas fa-search"></i></span>
                     <input type="text" name="search" class="form-control" value="{{ $accountFilters['search'] ?? '' }}" placeholder="اسم الحساب أو الكود">
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label">نوع الحساب</label>
-                    <select name="account_type" class="form-select">
-                        <option value="">كل الأنواع</option>
-                        @foreach ($accountTypeOptions as $value => $label)
-                            <option value="{{ $value }}" @selected(($accountFilters['account_type'] ?? '') === $value)>{{ $label }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">أقل مبلغ</label>
-                    <input type="number" step="0.01" name="min_balance" class="form-control" value="{{ $accountFilters['min_balance'] ?? '' }}" placeholder="0.00">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">أعلى مبلغ</label>
-                    <input type="number" step="0.01" name="max_balance" class="form-control" value="{{ $accountFilters['max_balance'] ?? '' }}" placeholder="0.00">
-                </div>
-                <div class="col-md-1 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary w-100">فلترة</button>
-                </div>
-                <div class="col-12 d-flex gap-2 flex-wrap">
-                    <button type="submit" class="btn btn-outline-primary">
-                        <i class="fas fa-search ms-1"></i>بحث
-                    </button>
-                    <a href="{{ route('chart_of_accounts') }}" class="btn btn-outline-secondary">
-                        <i class="fas fa-undo ms-1"></i>مسح الفلاتر
-                    </a>
-                </div>
-            </form>
-        </div>
-    </div>
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">نوع الحساب</label>
+                <select name="account_type" class="form-select">
+                    <option value="">كل الأنواع</option>
+                    @foreach ($accountTypeOptions as $value => $label)
+                        <option value="{{ $value }}" @selected(($accountFilters['account_type'] ?? '') === $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">أقل رصيد</label>
+                <input type="number" step="0.01" name="min_balance" class="form-control" value="{{ $accountFilters['min_balance'] ?? '' }}" placeholder="0.00">
+            </div>
+            <div class="col-lg-2 col-md-6">
+                <label class="form-label">أعلى رصيد</label>
+                <input type="number" step="0.01" name="max_balance" class="form-control" value="{{ $accountFilters['max_balance'] ?? '' }}" placeholder="0.00">
+            </div>
+            <div class="col-lg-1 col-md-12 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-filter ms-1"></i> فلترة
+                </button>
+            </div>
+        </form>
+    </section>
 
-    @foreach (['asset' => 'أصول', 'liability' => 'خصوم', 'equity' => 'ملكية', 'revenue' => 'إيرادات', 'expense' => 'مصروفات', 'cogs' => 'تكلفة'] as $type => $label)
-        <div class="col-md-2 mb-3 mb-md-0">
-            <div class="text-center p-3 bg-white rounded">
-                <div class="account-type-badge {{ $type }} mb-2">{{ $label }}</div>
-                <h4>{{ $accountStats->where('account_type', $type)->count() }}</h4>
+    <section class="coa-tree-shell">
+        <div class="coa-tree-header">
+            <div>
+                <h2 class="coa-tree-title"><i class="fas fa-diagram-project ms-2 text-primary"></i>الهيكل الشجري للحسابات</h2>
+                <p class="coa-tree-subtitle">افتح الفروع التي تحتاجها فقط، وانتقل عبر الحسابات من الجذر حتى أدق الحسابات الفرعية.</p>
+            </div>
+            <div class="coa-tree-toolbar">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-tree-expand="all">
+                    <i class="fas fa-up-right-and-down-left-from-center ms-1"></i> توسيع الكل
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-tree-collapse="all">
+                    <i class="fas fa-minimize ms-1"></i> طي الكل
+                </button>
             </div>
         </div>
-    @endforeach
-</div>
 
-<div class="account-tree">
-    <h5 class="mb-3"><i class="fas fa-sitemap ms-2 text-primary"></i> هيكل الحسابات</h5>
-    @if (session('status'))
-        <div class="alert alert-success">{{ session('status') }}</div>
-    @endif
-    @if ($hasAccountFilters)
-        <div class="alert alert-info">
-            تم تطبيق الفلاتر على الشجرة. يتم عرض الحسابات المطابقة مع حساباتها الأب لإبقاء الهيكل واضحًا.
+        @if (session('status'))
+            <div class="alert alert-success">{{ session('status') }}</div>
+        @endif
+
+        @if ($hasAccountFilters)
+            <div class="alert alert-info">
+                تم تطبيق الفلاتر على الشجرة، لذلك يتم إظهار الحسابات المطابقة مع آبائها للحفاظ على التسلسل المحاسبي واضحًا.
+            </div>
+        @endif
+
+        <div class="coa-tree-canvas">
+            @forelse ($accounts->whereNull('parent_id') as $account)
+                @include('partials.account_node', ['account' => $account, 'company' => $company, 'level' => 0, 'canManageAccounts' => $canManageAccounts])
+            @empty
+                <div class="coa-empty-state">
+                    <i class="fas fa-folder-open"></i>
+                    <h5 class="mb-2">{{ $hasAccountFilters ? 'لا توجد حسابات مطابقة للفلاتر المحددة' : 'لا توجد حسابات بعد' }}</h5>
+                    <p class="mb-0">جرّب توسيع نطاق الفلاتر أو أضف حسابًا جديدًا لبدء بناء الدليل.</p>
+                </div>
+            @endforelse
         </div>
-    @endif
-    @forelse ($accounts->whereNull('parent_id') as $account)
-        @include('partials.account_node', ['account' => $account, 'company' => $company, 'level' => 0, 'canManageAccounts' => $canManageAccounts])
-    @empty
-        <div class="text-center py-5 text-muted">{{ $hasAccountFilters ? 'لا توجد حسابات مطابقة للفلاتر المحددة' : 'لا توجد حسابات بعد' }}</div>
-    @endforelse
+    </section>
 </div>
 
 @if ($canManageAccounts)
@@ -273,6 +580,18 @@ document.addEventListener('DOMContentLoaded', function () {
             window.bootstrap.Modal.getOrCreateInstance(modalElement).show();
         }
     }
+
+    document.querySelector('[data-tree-expand="all"]')?.addEventListener('click', function () {
+        document.querySelectorAll('.coa-node-children.collapse').forEach(function (element) {
+            window.bootstrap.Collapse.getOrCreateInstance(element, { toggle: false }).show();
+        });
+    });
+
+    document.querySelector('[data-tree-collapse="all"]')?.addEventListener('click', function () {
+        document.querySelectorAll('.coa-node-children.collapse').forEach(function (element) {
+            window.bootstrap.Collapse.getOrCreateInstance(element, { toggle: false }).hide();
+        });
+    });
 });
 </script>
 @endpush

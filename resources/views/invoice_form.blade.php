@@ -7,10 +7,10 @@
     $invoiceDateValue = old('invoice_date', $isEditingInvoice ? optional($invoice->invoice_date)->format('Y-m-d') : now()->format('Y-m-d'));
     $dueDateValue = old('due_date', $isEditingInvoice ? optional($invoice->due_date)->format('Y-m-d') : now()->addDays(30)->format('Y-m-d'));
     $customerIdValue = old('customer_id', $isEditingInvoice ? $invoice->customer_id : null);
-    $branchIdValue = old('branch_id', $isEditingInvoice ? $invoice->branch_id : ($defaultBranchId ?? null));
-    $employeeIdValue = old('employee_id', $isEditingInvoice ? $invoice->employee_id : null);
     $salesChannelIdValue = old('sales_channel_id', $isEditingInvoice ? $invoice->sales_channel_id : ($defaultSalesChannelId ?? null));
     $paymentMethodIdValue = old('payment_method_id', $isEditingInvoice ? $invoice->payment_method_id : ($defaultPaymentMethodId ?? null));
+    $paymentStatusValue = old('payment_status', $isEditingInvoice ? match ($invoice->payment_status) { 'paid' => 'full', 'pending' => 'deferred', default => $invoice->payment_status } : 'deferred');
+    $paidAmountValue = old('paid_amount', $isEditingInvoice ? number_format((float) $invoice->paid_amount, 2, '.', '') : '0');
     $invoiceStatusValue = old('status', $isEditingInvoice ? $invoice->status : 'sent');
     $notesValue = old('notes', $isEditingInvoice ? $invoice->notes : '');
     $termsValue = old('terms', $isEditingInvoice ? $invoice->terms : '');
@@ -118,7 +118,7 @@
                 ]]);
         }
     @endphp
-    <form method="POST" action="{{ $isEditingInvoice ? route('invoices.update', $invoice) : route('invoices.store') }}" data-invoice-form>
+    <form method="POST" action="{{ $isEditingInvoice ? route('invoices.update', $invoice) : route('invoices.store') }}" enctype="multipart/form-data" data-invoice-form>
         @csrf
         @if ($isEditingInvoice)
             @method('PUT')
@@ -151,23 +151,16 @@
         </div>
 
         <div class="row mb-4">
-            <div class="col-md-3 mb-3 mb-md-0">
-                <label class="form-label">الفرع *</label>
-                <select name="branch_id" class="form-select" required>
-                    <option value="">اختر الفرع</option>
-                    @foreach ($branches as $branch)
-                        <option value="{{ $branch->id }}" {{ (string) $branchIdValue === (string) $branch->id ? 'selected' : '' }}>{{ $branch->name }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-md-3 mb-3 mb-md-0">
-                <label class="form-label">الموظف</label>
-                <select name="employee_id" class="form-select">
-                    <option value="">بدون موظف</option>
-                    @foreach ($employees as $employee)
-                        <option value="{{ $employee->id }}" {{ (string) $employeeIdValue === (string) $employee->id ? 'selected' : '' }}>{{ trim($employee->full_name) !== '' ? $employee->full_name : ('موظف #' . $employee->id) }}</option>
-                    @endforeach
-                </select>
+            <div class="col-md-6 mb-3 mb-md-0">
+                <label class="form-label">ملكية عملية البيع</label>
+                <div class="border rounded-3 p-3 bg-light-subtle h-100">
+                    <div class="fw-semibold mb-1">المستخدم: {{ $salesOwnerContext['user_name'] ?: 'غير محدد' }}</div>
+                    <div class="small text-muted mb-1">الموظف: {{ $salesOwnerContext['employee_name'] ?: 'غير مرتبط' }}</div>
+                    <div class="small text-muted">الفرع: {{ $salesOwnerContext['branch_name'] ?: 'غير مرتبط' }}</div>
+                    @if (! empty($salesOwnerContext['warning']))
+                        <div class="alert alert-warning mt-3 mb-0 py-2">{{ $salesOwnerContext['warning'] }}</div>
+                    @endif
+                </div>
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
                 <label class="form-label">قناة البيع *</label>
@@ -178,7 +171,7 @@
                     @endforeach
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3" data-payment-method-wrapper>
                 <label class="form-label">طريقة الدفع *</label>
                 <select name="payment_method_id" class="form-select" required>
                     <option value="">اختر طريقة الدفع</option>
@@ -186,6 +179,36 @@
                         <option value="{{ $paymentMethod->id }}" {{ (string) $paymentMethodIdValue === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
                     @endforeach
                 </select>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-3 mb-3 mb-md-0">
+                <label class="form-label">حالة الدفع *</label>
+                <select name="payment_status" class="form-select" data-payment-status required>
+                    <option value="deferred" {{ $paymentStatusValue === 'deferred' ? 'selected' : '' }}>آجل</option>
+                    <option value="partial" {{ $paymentStatusValue === 'partial' ? 'selected' : '' }}>دفع جزئي</option>
+                    <option value="full" {{ $paymentStatusValue === 'full' ? 'selected' : '' }}>دفع كامل</option>
+                </select>
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0" data-paid-amount-wrapper>
+                <label class="form-label">المبلغ المدفوع</label>
+                <input type="number" name="paid_amount" class="form-control @error('paid_amount') is-invalid @enderror" value="{{ $paidAmountValue }}" min="0" step="0.01" data-paid-amount>
+                @error('paid_amount')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
+                <label class="form-label">المبلغ المتبقي</label>
+                <input type="text" class="form-control" value="0.00 {{ $company->currency }}" data-balance-due readonly>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">مرفق الفاتورة</label>
+                <input type="file" name="attachment" class="form-control @error('attachment') is-invalid @enderror" accept="application/pdf,image/*">
+                @error('attachment')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                @if ($isEditingInvoice && $invoice->attachment_path)
+                    <div class="form-text"><a href="{{ route('invoices.attachment', $invoice) }}" target="_blank" rel="noopener">عرض المرفق الحالي</a></div>
+                @else
+                    <div class="form-text">المرفق اختياري.</div>
+                @endif
             </div>
         </div>
 
@@ -277,6 +300,16 @@
                     <h4 id="totalAmount" class="text-primary">0.00 {{ $company->currency }}</h4>
                 </div>
             </div>
+            <div class="row mt-3">
+                <div class="col-md-3 mb-3 mb-md-0">
+                    <label class="form-label">المبلغ المدفوع</label>
+                    <h4 id="paidAmountSummary">0.00 {{ $company->currency }}</h4>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">المتبقي</label>
+                    <h4 id="balanceDueSummary" class="text-danger">0.00 {{ $company->currency }}</h4>
+                </div>
+            </div>
         </div>
 
         <div class="row mt-4">
@@ -332,7 +365,68 @@ function recalculateInvoiceTotals(form) {
     form.querySelector('#subtotal').textContent = `${subtotal.toFixed(2)} {{ $company->currency }}`;
     form.querySelector('#taxAmount').textContent = `${taxAmount.toFixed(2)} {{ $company->currency }}`;
     form.querySelector('#totalAmount').textContent = `${total.toFixed(2)} {{ $company->currency }}`;
+    syncInvoicePaymentFields(form, total);
     updateInvoiceStockWarnings(form);
+}
+
+function syncInvoicePaymentFields(form, totalAmount) {
+    const paymentStatusField = form.querySelector('[data-payment-status]');
+    const paidAmountField = form.querySelector('[data-paid-amount]');
+    const balanceField = form.querySelector('[data-balance-due]');
+    const paidSummary = form.querySelector('#paidAmountSummary');
+    const balanceSummary = form.querySelector('#balanceDueSummary');
+    const paymentMethodWrapper = form.querySelector('[data-payment-method-wrapper]');
+    const paymentMethodSelect = paymentMethodWrapper?.querySelector('select[name="payment_method_id"]');
+    const paidAmountWrapper = form.querySelector('[data-paid-amount-wrapper]');
+
+    if (!paymentStatusField || !paidAmountField) {
+        return;
+    }
+
+    if (paymentStatusField.value === 'full') {
+        paidAmountField.value = totalAmount.toFixed(2);
+        paidAmountField.readOnly = true;
+        paidAmountWrapper?.classList.add('d-none');
+        paymentMethodWrapper?.classList.remove('d-none');
+        if (paymentMethodSelect) {
+            paymentMethodSelect.required = true;
+        }
+    } else if (paymentStatusField.value === 'deferred') {
+        paidAmountField.value = '0.00';
+        paidAmountField.readOnly = true;
+        paidAmountWrapper?.classList.add('d-none');
+        paymentMethodWrapper?.classList.add('d-none');
+        if (paymentMethodSelect) {
+            paymentMethodSelect.required = false;
+            paymentMethodSelect.value = '';
+        }
+    } else {
+        paidAmountField.readOnly = false;
+        paidAmountWrapper?.classList.remove('d-none');
+        paymentMethodWrapper?.classList.remove('d-none');
+        if (paymentMethodSelect) {
+            paymentMethodSelect.required = true;
+        }
+        const partialValue = Math.min(invoiceNumericValue(paidAmountField.value), totalAmount);
+        paidAmountField.value = partialValue.toFixed(2);
+    }
+
+    const paidAmount = Math.min(invoiceNumericValue(paidAmountField.value), totalAmount);
+    const balanceDue = Math.max(totalAmount - paidAmount, 0);
+
+    if (balanceField) {
+        balanceField.value = `${balanceDue.toFixed(2)} {{ $company->currency }}`;
+    }
+
+    if (paidSummary) {
+        paidSummary.textContent = `${paidAmount.toFixed(2)} {{ $company->currency }}`;
+    }
+
+    if (balanceSummary) {
+        balanceSummary.textContent = `${balanceDue.toFixed(2)} {{ $company->currency }}`;
+        balanceSummary.classList.toggle('text-success', balanceDue <= 0);
+        balanceSummary.classList.toggle('text-danger', balanceDue > 0);
+    }
 }
 
 function invoiceSelectedProductOption(row) {
@@ -520,6 +614,8 @@ function addInvoiceRow(form) {
 document.querySelectorAll('[data-invoice-form]').forEach((form) => {
     form.querySelectorAll('[data-invoice-item-row]').forEach((row) => bindInvoiceRow(row, form));
     form.querySelector('#addInvoiceItem')?.addEventListener('click', () => addInvoiceRow(form));
+    form.querySelector('[data-payment-status]')?.addEventListener('change', () => recalculateInvoiceTotals(form));
+    form.querySelector('[data-paid-amount]')?.addEventListener('input', () => recalculateInvoiceTotals(form));
     form.addEventListener('submit', (event) => {
         if (updateInvoiceStockWarnings(form)) {
             return;

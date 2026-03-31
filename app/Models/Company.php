@@ -73,6 +73,16 @@ class Company extends Model
         return $this->hasMany(Employee::class);
     }
 
+    public function branches(): HasMany
+    {
+        return $this->hasMany(Branch::class);
+    }
+
+    public function salesChannels(): HasMany
+    {
+        return $this->hasMany(SalesChannel::class);
+    }
+
     public function products(): HasMany
     {
         return $this->hasMany(Product::class);

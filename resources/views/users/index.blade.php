@@ -50,6 +50,7 @@
                     <tr>
                         <th>الاسم</th>
                         <th>البريد</th>
+                        <th>الموظف / الفرع</th>
                         <th>الأدوار</th>
                         <th>صلاحيات إضافية</th>
                         <th>الحالة</th>
@@ -65,6 +66,14 @@
                                 <small class="text-muted">{{ $managedUser->role_label }}</small>
                             </td>
                             <td>{{ $managedUser->email }}</td>
+                            <td>
+                                @if ($managedUser->employee)
+                                    <div class="fw-semibold">{{ $managedUser->employee->full_name }}</div>
+                                    <small class="text-muted">{{ $managedUser->employee->branch?->name ?? 'بدون فرع' }}</small>
+                                @else
+                                    <span class="text-muted">غير مرتبط</span>
+                                @endif
+                            </td>
                             <td>
                                 @forelse ($managedUser->roles as $role)
                                     <span class="badge bg-primary-subtle text-primary border me-1">{{ $role->display_name }}</span>
@@ -95,7 +104,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="text-center py-4">لا يوجد مستخدمون ضمن هذه الشركة</td>
+                            <td colspan="8" class="text-center py-4">لا يوجد مستخدمون ضمن هذه الشركة</td>
                         </tr>
                     @endforelse
                 </tbody>
@@ -125,6 +134,7 @@
         'userModel' => null,
         'roles' => $roles,
         'permissions' => $permissions,
+        'employees' => $employees,
         'groupTitles' => $groupTitles,
     ])
 @endif
@@ -138,6 +148,7 @@
             'userModel' => $managedUser,
             'roles' => $roles,
             'permissions' => $permissions,
+            'employees' => $employees,
             'groupTitles' => $groupTitles,
         ])
     @endforeach

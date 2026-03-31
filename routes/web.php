@@ -27,12 +27,23 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
     Route::middleware('permission:manage_invoices')->group(function () {
         Route::get('/invoices', [AccountingPageController::class, 'invoices'])->name('invoices');
         Route::get('/invoices/create', [AccountingPageController::class, 'invoiceCreate'])->name('invoices.create');
+        Route::get('/invoices/{invoice}/attachment', [AccountingPageController::class, 'showInvoiceAttachment'])->name('invoices.attachment');
         Route::get('/invoices/{invoice}/edit', [AccountingPageController::class, 'invoiceEdit'])->name('invoices.edit');
         Route::post('/invoices', [AccountingPageController::class, 'storeInvoice'])->name('invoices.store');
         Route::put('/invoices/{invoice}', [AccountingPageController::class, 'updateInvoice'])->name('invoices.update');
         Route::delete('/invoices/{invoice}', [AccountingPageController::class, 'destroyInvoice'])->name('invoices.destroy');
         Route::patch('/invoices/{invoice}/send', [AccountingPageController::class, 'sendInvoice'])->name('invoices.send');
         Route::get('/invoices/{invoice}', [AccountingPageController::class, 'invoiceShow'])->name('invoices.show');
+
+        Route::get('/sales-channels', [AccountingPageController::class, 'salesChannels'])->name('sales_channels.index');
+        Route::post('/sales-channels', [AccountingPageController::class, 'storeSalesChannel'])->name('sales_channels.store');
+        Route::put('/sales-channels/{salesChannel}', [AccountingPageController::class, 'updateSalesChannel'])->name('sales_channels.update');
+        Route::delete('/sales-channels/{salesChannel}', [AccountingPageController::class, 'destroySalesChannel'])->name('sales_channels.destroy');
+
+        Route::get('/payment-methods', [AccountingPageController::class, 'paymentMethods'])->name('payment_methods.index');
+        Route::post('/payment-methods', [AccountingPageController::class, 'storePaymentMethod'])->name('payment_methods.store');
+        Route::put('/payment-methods/{paymentMethod}', [AccountingPageController::class, 'updatePaymentMethod'])->name('payment_methods.update');
+        Route::delete('/payment-methods/{paymentMethod}', [AccountingPageController::class, 'destroyPaymentMethod'])->name('payment_methods.destroy');
     });
 
     Route::middleware('permission:manage_purchases')->group(function () {
@@ -71,6 +82,7 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
     Route::middleware('permission:manage_accounts')->group(function () {
         Route::get('/chart-of-accounts', [AccountingPageController::class, 'chartOfAccounts'])->name('chart_of_accounts');
         Route::post('/chart-of-accounts', [AccountingPageController::class, 'storeAccount'])->name('chart_of_accounts.store');
+        Route::post('/chart-of-accounts/resync', [AccountingPageController::class, 'resyncCompanyAccounting'])->name('chart_of_accounts.resync');
         Route::get('/expenses', [AccountingPageController::class, 'expenses'])->name('expenses');
         Route::post('/expenses', [AccountingPageController::class, 'storeExpense'])->name('expenses.store');
         Route::delete('/expenses/{expense}', [AccountingPageController::class, 'destroyExpense'])->name('expenses.destroy');
@@ -90,7 +102,16 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
     });
 
     Route::middleware('permission:manage_employees')->group(function () {
+        Route::get('/branches', [AccountingPageController::class, 'branches'])->name('branches.index');
+        Route::post('/branches', [AccountingPageController::class, 'storeBranch'])->name('branches.store');
+        Route::put('/branches/{branch}', [AccountingPageController::class, 'updateBranch'])->name('branches.update');
+        Route::delete('/branches/{branch}', [AccountingPageController::class, 'destroyBranch'])->name('branches.destroy');
+
         Route::get('/hr', [AccountingPageController::class, 'hr'])->name('hr');
+        Route::get('/employees', [AccountingPageController::class, 'hr'])->name('employees.index');
+        Route::post('/employees', [AccountingPageController::class, 'storeEmployee'])->name('employees.store');
+        Route::put('/employees/{employee}', [AccountingPageController::class, 'updateEmployee'])->name('employees.update');
+        Route::delete('/employees/{employee}', [AccountingPageController::class, 'destroyEmployee'])->name('employees.destroy');
     });
 
     Route::middleware('permission:manage_settings')->group(function () {

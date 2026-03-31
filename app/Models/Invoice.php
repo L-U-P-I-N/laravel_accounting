@@ -15,6 +15,7 @@ class Invoice extends Model
         'invoice_number',
         'customer_id',
         'employee_id',
+        'user_id',
         'company_id',
         'branch_id',
         'sales_channel_id',
@@ -28,6 +29,7 @@ class Invoice extends Model
         'balance_due',
         'status',
         'payment_status',
+        'attachment_path',
         'notes',
         'terms',
         'currency',
@@ -58,6 +60,11 @@ class Invoice extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function branch(): BelongsTo

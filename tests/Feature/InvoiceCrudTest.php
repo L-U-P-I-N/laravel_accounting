@@ -4,8 +4,10 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\AccountingPageController;
 use App\Models\Account;
+use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Employee;
 use App\Models\Invoice;
 use App\Models\JournalEntry;
 use App\Models\Product;
@@ -13,6 +15,8 @@ use App\Models\TaxSetting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -267,12 +271,127 @@ class InvoiceCrudTest extends TestCase
         ]);
     }
 
+    public function test_store_invoice_supports_partial_payment_and_optional_attachment(): void
+    {
+        [$company, $user, $customer, $product, $employee, $branch] = $this->invoiceContext('partial-payment-invoice@example.com');
+
+        $request = Request::create('/invoices', 'POST', [
+            'customer_id' => $customer->id,
+            'invoice_date' => '2026-03-27',
+            'due_date' => '2026-04-27',
+            'status' => 'sent',
+            'payment_status' => 'partial',
+            'paid_amount' => 20,
+            'item_product_id' => [$product->id],
+            'item_description' => ['Partial product'],
+            'item_quantity' => [2],
+            'item_price' => [25],
+            'item_tax_rate' => [15],
+        ]);
+        $request->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->storeInvoice($request);
+
+        $invoice = Invoice::firstOrFail();
+        $this->assertSame('partial', $invoice->payment_status);
+        $this->assertSame(20.0, (float) $invoice->paid_amount);
+        $this->assertSame(37.5, (float) $invoice->balance_due);
+        $this->assertSame($user->id, (int) $invoice->user_id);
+        $this->assertSame($employee->id, (int) $invoice->employee_id);
+        $this->assertSame($branch->id, (int) $invoice->branch_id);
+        $this->assertNull($invoice->attachment_path);
+    }
+
+    public function test_store_invoice_sets_full_payment_to_invoice_total_and_stores_optional_attachment(): void
+    {
+        Storage::fake('public');
+
+        [$company, $user, $customer, $product] = $this->invoiceContext('full-payment-invoice@example.com');
+
+        $request = Request::create('/invoices', 'POST', [
+            'customer_id' => $customer->id,
+            'invoice_date' => '2026-03-27',
+            'due_date' => '2026-04-27',
+            'status' => 'sent',
+            'payment_status' => 'full',
+            'paid_amount' => 1,
+            'item_product_id' => [$product->id],
+            'item_description' => ['Paid product'],
+            'item_quantity' => [2],
+            'item_price' => [25],
+            'item_tax_rate' => [15],
+        ], [], [
+            'attachment' => UploadedFile::fake()->create('invoice.pdf', 200, 'application/pdf'),
+        ]);
+        $request->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->storeInvoice($request);
+
+        $invoice = Invoice::firstOrFail();
+        $this->assertSame('full', $invoice->payment_status);
+        $this->assertSame(57.5, (float) $invoice->paid_amount);
+        $this->assertSame(0.0, (float) $invoice->balance_due);
+        $this->assertNotNull($invoice->attachment_path);
+        Storage::disk('public')->assertExists($invoice->attachment_path);
+    }
+
+    public function test_owner_can_store_invoice_without_employee_and_uses_default_branch(): void
+    {
+        [$company, $user, $customer, $product, $employee, $branch] = $this->invoiceContext('owner-without-employee@example.com');
+
+        $user->update(['employee_id' => null]);
+        $employee->delete();
+
+        $request = Request::create('/invoices', 'POST', [
+            'customer_id' => $customer->id,
+            'invoice_date' => '2026-03-27',
+            'due_date' => '2026-04-27',
+            'status' => 'sent',
+            'payment_status' => 'deferred',
+            'item_product_id' => [$product->id],
+            'item_description' => ['Owner product'],
+            'item_quantity' => [1],
+            'item_price' => [25],
+            'item_tax_rate' => [15],
+        ]);
+        $request->setUserResolver(fn () => $user->fresh());
+
+        app(AccountingPageController::class)->storeInvoice($request);
+
+        $invoice = Invoice::firstOrFail();
+        $this->assertSame($user->id, (int) $invoice->user_id);
+        $this->assertNull($invoice->employee_id);
+        $this->assertSame($branch->id, (int) $invoice->branch_id);
+        $this->assertSame('deferred', $invoice->payment_status);
+    }
+
     private function invoiceContext(string $email): array
     {
         $company = Company::create([
             'name' => 'Invoice Test Co',
             'country_code' => 'SA',
             'currency' => 'SAR',
+        ]);
+
+        $branch = Branch::create([
+            'company_id' => $company->id,
+            'name' => 'الفرع الرئيسي',
+            'code' => 'MAIN',
+            'city' => 'الرياض',
+            'is_default' => true,
+        ]);
+
+        $employee = Employee::create([
+            'employee_number' => 'EMP-0001',
+            'company_id' => $company->id,
+            'branch_id' => $branch->id,
+            'first_name' => 'Sales',
+            'last_name' => 'Rep',
+            'email' => 'employee-' . md5($email) . '@example.com',
+            'hire_date' => '2026-01-01',
+            'salary' => 5000,
+            'status' => 'active',
+            'employment_type' => 'full_time',
         ]);
 
         $user = User::create([
@@ -286,6 +405,7 @@ class InvoiceCrudTest extends TestCase
             'is_active' => true,
             'must_change_password' => false,
             'company_id' => $company->id,
+            'employee_id' => $employee->id,
         ]);
 
         $customer = Customer::create([
@@ -307,6 +427,6 @@ class InvoiceCrudTest extends TestCase
             'is_active' => true,
         ]);
 
-        return [$company, $user, $customer, $product];
+        return [$company, $user, $customer, $product, $employee, $branch];
     }
 }

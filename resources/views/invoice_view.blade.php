@@ -121,10 +121,14 @@
                 <p class="mb-1"><strong>المجموع الفرعي:</strong> {{ number_format((float) $invoice->subtotal, 2) }} {{ $invoice->currency ?: $company->currency }}</p>
                 <p class="mb-1"><strong>ضريبة القيمة المضافة:</strong> {{ number_format((float) $invoice->tax_amount, 2) }} {{ $invoice->currency ?: $company->currency }}</p>
                 <h4 class="text-primary"><strong>الإجمالي:</strong> {{ number_format((float) $invoice->total, 2) }} {{ $invoice->currency ?: $company->currency }}</h4>
+                <p class="mb-1"><strong>حالة الدفع:</strong> {{ match ($invoice->payment_status) { 'full', 'paid' => 'دفع كامل', 'partial' => 'دفع جزئي', default => 'آجل' } }}</p>
                 <p class="mb-1"><strong>المدفوع:</strong> {{ number_format((float) $invoice->paid_amount, 2) }} {{ $invoice->currency ?: $company->currency }}</p>
                 <h4 class="text-{{ (float) $invoice->balance_due <= 0 ? 'success' : 'danger' }}">
                     <strong>الرصيد المتبقي:</strong> {{ number_format((float) $invoice->balance_due, 2) }} {{ $invoice->currency ?: $company->currency }}
                 </h4>
+                @if ($invoice->attachment_path)
+                    <div class="mt-2"><a href="{{ route('invoices.attachment', $invoice) }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary"><i class="fas fa-paperclip ms-1"></i>عرض المرفق</a></div>
+                @endif
             </div>
         </div>
     </div>

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\AccountingPageController;
 use App\Http\Controllers\AuthController;
+use App\Models\Account;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -37,6 +38,52 @@ class RegistrationAndCustomerShowTest extends TestCase
         $this->assertSame('AE', $company->country_code);
         $this->assertSame('دبي', $company->city);
         $this->assertSame('AED', $company->currency);
+    }
+
+    public function test_register_creates_the_restructured_default_chart_of_accounts(): void
+    {
+        $request = Request::create('/register', 'POST', [
+            'email' => 'register-accounts@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+            'first_name' => 'Owner',
+            'last_name' => 'Accounts',
+            'company_name' => 'Register Accounts Co',
+            'country_code' => 'SA',
+            'city' => 'الرياض',
+        ]);
+
+        app(AuthController::class)->register($request);
+
+        $company = Company::query()->where('name', 'Register Accounts Co')->firstOrFail();
+        $accounts = Account::query()->where('company_id', $company->id)->get()->keyBy('code');
+
+        $this->assertArrayHasKey('1', $accounts);
+        $this->assertArrayHasKey('1.1', $accounts);
+        $this->assertArrayHasKey('1.2', $accounts);
+        $this->assertArrayHasKey('1.3', $accounts);
+        $this->assertArrayHasKey('2', $accounts);
+        $this->assertArrayHasKey('2.1', $accounts);
+        $this->assertArrayHasKey('2.2', $accounts);
+        $this->assertArrayHasKey('3', $accounts);
+        $this->assertArrayHasKey('3.1', $accounts);
+        $this->assertArrayHasKey('4', $accounts);
+        $this->assertArrayHasKey('4.1', $accounts);
+        $this->assertArrayHasKey('4.2', $accounts);
+
+        $this->assertSame('الأصول', $accounts['1']->name_ar);
+        $this->assertSame($accounts['1']->id, $accounts['1.1']->parent_id);
+        $this->assertSame($accounts['1']->id, $accounts['1.2']->parent_id);
+        $this->assertSame($accounts['1']->id, $accounts['1.3']->parent_id);
+        $this->assertSame($accounts['2']->id, $accounts['2.1']->parent_id);
+        $this->assertSame($accounts['2']->id, $accounts['2.2']->parent_id);
+        $this->assertSame($accounts['3']->id, $accounts['3.1']->parent_id);
+        $this->assertSame($accounts['4']->id, $accounts['4.1']->parent_id);
+        $this->assertSame($accounts['4']->id, $accounts['4.2']->parent_id);
+        $this->assertArrayNotHasKey('1000', $accounts);
+        $this->assertArrayNotHasKey('2000', $accounts);
+        $this->assertArrayNotHasKey('4000', $accounts);
+        $this->assertArrayNotHasKey('6000', $accounts);
     }
 
     public function test_customer_show_returns_customer_and_invoices_data(): void

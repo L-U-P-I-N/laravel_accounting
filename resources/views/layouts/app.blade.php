@@ -30,10 +30,28 @@
                     <span>إدارة المستخدمين</span>
                 </a>
             @endif
+            @if ($currentUser?->hasPermission('manage_employees'))
+                <a href="{{ route('branches.index') }}" class="nav-link {{ request()->routeIs('branches.*') ? 'active' : '' }}">
+                    <i class="fas fa-code-branch"></i>
+                    <span>الفروع</span>
+                </a>
+                <a href="{{ route('employees.index') }}" class="nav-link {{ request()->routeIs('employees.*') || request()->routeIs('hr') ? 'active' : '' }}">
+                    <i class="fas fa-user-tie"></i>
+                    <span>الموظفون</span>
+                </a>
+            @endif
             @if ($currentUser?->hasPermission('manage_invoices'))
                 <a href="{{ route('invoices') }}" class="nav-link {{ request()->routeIs('invoices*') ? 'active' : '' }}">
                     <i class="fas fa-file-invoice"></i>
                     <span>المبيعات</span>
+                </a>
+                <a href="{{ route('sales_channels.index') }}" class="nav-link {{ request()->routeIs('sales_channels.*') ? 'active' : '' }}">
+                    <i class="fas fa-share-nodes"></i>
+                    <span>قنوات البيع</span>
+                </a>
+                <a href="{{ route('payment_methods.index') }}" class="nav-link {{ request()->routeIs('payment_methods.*') ? 'active' : '' }}">
+                    <i class="fas fa-money-check-dollar"></i>
+                    <span>طرق الدفع</span>
                 </a>
             @endif
             @if ($currentUser?->hasPermission('manage_purchases'))
@@ -80,12 +98,6 @@
                 <a href="{{ route('reports') }}" class="nav-link {{ request()->routeIs('reports') ? 'active' : '' }}">
                     <i class="fas fa-chart-bar"></i>
                     <span>التقارير</span>
-                </a>
-            @endif
-            @if ($currentUser?->hasPermission('manage_employees'))
-                <a href="{{ route('hr') }}" class="nav-link {{ request()->routeIs('hr') ? 'active' : '' }}">
-                    <i class="fas fa-user-tie"></i>
-                    <span>الموارد البشرية</span>
                 </a>
             @endif
             @if ($currentUser?->hasPermission('manage_settings'))

@@ -32,4 +32,9 @@ class Branch extends Model
     {
         return $this->hasMany(Invoice::class);
     }
+
+    public function employees(): HasMany
+    {
+        return $this->hasMany(Employee::class);
+    }
 }

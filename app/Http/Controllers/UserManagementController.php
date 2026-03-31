@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Employee;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
@@ -20,16 +21,22 @@ class UserManagementController extends Controller
 
         $company = $request->user()->company;
         $users = User::query()
-            ->with(['roles', 'permissions'])
+            ->with(['roles', 'permissions', 'employee.branch'])
             ->where('company_id', $company->id)
             ->orderByDesc('id')
+            ->get();
+        $employees = Employee::query()
+            ->with('branch')
+            ->where('company_id', $company->id)
+            ->orderBy('first_name')
+            ->orderBy('last_name')
             ->get();
 
         $roles = Role::query()->with('permissions')->orderBy('id')->get();
         $permissions = Permission::query()->orderBy('group')->orderBy('id')->get()->groupBy('group');
         $canManageUsers = $request->user()->hasPermission('manage_users');
 
-        return view('users.index', compact('company', 'users', 'roles', 'permissions', 'canManageUsers'));
+        return view('users.index', compact('company', 'users', 'roles', 'permissions', 'employees', 'canManageUsers'));
     }
 
     public function store(Request $request): RedirectResponse
@@ -44,6 +51,11 @@ class UserManagementController extends Controller
             'language' => ['nullable', 'string', 'max:5'],
             'is_active' => ['nullable', 'boolean'],
             'must_change_password' => ['nullable', 'boolean'],
+            'employee_id' => [
+                'nullable',
+                Rule::exists('employees', 'id')->where(fn ($query) => $query->where('company_id', $request->user()->company_id)),
+                Rule::unique('users', 'employee_id'),
+            ],
             'role_ids' => ['nullable', 'array'],
             'role_ids.*' => ['integer', Rule::exists('roles', 'id')],
             'permission_ids' => ['nullable', 'array'],
@@ -68,6 +80,7 @@ class UserManagementController extends Controller
             'is_active' => (bool) ($validated['is_active'] ?? true),
             'must_change_password' => $request->boolean('must_change_password', true),
             'company_id' => $request->user()->company_id,
+            'employee_id' => $validated['employee_id'] ?? null,
         ]);
 
         $user->roles()->sync($roleIds->all());
@@ -90,6 +103,11 @@ class UserManagementController extends Controller
             'language' => ['nullable', 'string', 'max:5'],
             'is_active' => ['nullable', 'boolean'],
             'must_change_password' => ['nullable', 'boolean'],
+            'employee_id' => [
+                'nullable',
+                Rule::exists('employees', 'id')->where(fn ($query) => $query->where('company_id', $request->user()->company_id)),
+                Rule::unique('users', 'employee_id')->ignore($user->id),
+            ],
             'role_ids' => ['nullable', 'array'],
             'role_ids.*' => ['integer', Rule::exists('roles', 'id')],
             'permission_ids' => ['nullable', 'array'],
@@ -119,6 +137,7 @@ class UserManagementController extends Controller
             'language' => $validated['language'] ?? $user->language,
             'is_active' => (bool) ($validated['is_active'] ?? false),
             'must_change_password' => $request->boolean('must_change_password'),
+            'employee_id' => $validated['employee_id'] ?? null,
         ];
 
         if (!empty($validated['password'])) {

@@ -12,6 +12,7 @@
         ->all();
     $selectedRoles = $roles->whereIn('id', $currentRoleIds);
     $selectedPermissionsCount = count($currentPermissionIds);
+    $employeeIdValue = $useOldInput ? old('employee_id', $userModel?->employee_id) : $userModel?->employee_id;
     $initials = $isEditing
         ? mb_strtoupper(mb_substr($userModel->first_name ?? '', 0, 1) . mb_substr($userModel->last_name ?? '', 0, 1))
         : 'NU';
@@ -121,6 +122,17 @@
                                             <select name="language" class="form-select">
                                                 <option value="ar" @selected(($useOldInput ? old('language', $userModel?->language ?? 'ar') : ($userModel?->language ?? 'ar')) === 'ar')>العربية</option>
                                                 <option value="en" @selected(($useOldInput ? old('language', $userModel?->language ?? 'ar') : ($userModel?->language ?? 'ar')) === 'en')>English</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">ربط بموظف</label>
+                                            <select name="employee_id" class="form-select">
+                                                <option value="">بدون ربط</option>
+                                                @foreach ($employees as $employee)
+                                                    <option value="{{ $employee->id }}" @selected((string) $employeeIdValue === (string) $employee->id)>
+                                                        {{ $employee->full_name }}{{ $employee->branch?->name ? ' - ' . $employee->branch->name : '' }}
+                                                    </option>
+                                                @endforeach
                                             </select>
                                         </div>
                                         <div class="col-md-6">

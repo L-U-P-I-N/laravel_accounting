@@ -25,14 +25,6 @@
             'partial' => 'دفع جزئي',
             'pending' => 'أجل',
         ];
-        $paymentMethodOptions = [
-            'payables' => 'الدائنين الدائمين',
-            'cash' => 'نقدي',
-            'bank_transfer' => 'تحويل بنكي',
-            'cheque' => 'شيك',
-            'credit_card' => 'بطاقة ائتمان',
-            'other' => 'أخرى',
-        ];
         $purchasesReportParams = array_filter([
             'report_type' => 'payables',
             'supplier_id' => $supplierFilter !== '' ? $supplierFilter : null,
@@ -262,7 +254,7 @@
                 default => 'danger',
             };
             $showPaymentStatus = $paymentStatusOptions[$purchase->payment_status] ?? 'غير محدد';
-            $showPaymentMethod = $purchase->payment_method ? ($paymentMethodOptions[$purchase->payment_method] ?? $purchase->payment_method) : 'غير محدد';
+            $showPaymentMethod = $purchase->paymentMethod?->name ?? 'غير محدد';
             $showAttachmentUrl = $purchase->attachment_path ? route('purchases.attachment', $purchase) : null;
         @endphp
         <div class="modal fade" id="showPurchaseModal{{ $purchase->id }}" tabindex="-1" aria-hidden="true">
@@ -417,10 +409,10 @@
                                     <div class="col-md-4" data-payment-method-container>
                                         <div data-payment-method-input>
                                             <label class="form-label">طريقة الدفع</label>
-                                            <select name="payment_method" class="form-select">
-                                                <option value="" {{ ($editPurchaseModalHasErrors ? old('payment_method') : $purchase->payment_method) ? '' : 'selected' }}>لم يتم التحديد</option>
-                                                @foreach ($paymentMethodOptions as $value => $label)
-                                                    <option value="{{ $value }}" {{ ($editPurchaseModalHasErrors ? old('payment_method') : $purchase->payment_method) === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                            <select name="payment_method_id" class="form-select">
+                                                <option value="" {{ ($editPurchaseModalHasErrors ? old('payment_method_id') : $purchase->payment_method_id) ? '' : 'selected' }}>لم يتم التحديد</option>
+                                                @foreach ($paymentMethods as $paymentMethod)
+                                                    <option value="{{ $paymentMethod->id }}" {{ (string) ($editPurchaseModalHasErrors ? old('payment_method_id') : $purchase->payment_method_id) === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
                                                 @endforeach
                                             </select>
                                         </div>
@@ -567,10 +559,10 @@
                             <div class="col-md-4" data-payment-method-container>
                                 <div data-payment-method-input>
                                     <label class="form-label">طريقة الدفع</label>
-                                    <select name="payment_method" class="form-select">
-                                        <option value="" {{ old('payment_method') ? '' : 'selected' }}>لم يتم التحديد</option>
-                                        @foreach ($paymentMethodOptions as $value => $label)
-                                            <option value="{{ $value }}" {{ old('payment_method') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                    <select name="payment_method_id" class="form-select">
+                                        <option value="" {{ old('payment_method_id', $defaultPaymentMethodId) ? '' : 'selected' }}>لم يتم التحديد</option>
+                                        @foreach ($paymentMethods as $paymentMethod)
+                                            <option value="{{ $paymentMethod->id }}" {{ (string) old('payment_method_id', $defaultPaymentMethodId) === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
                                         @endforeach
                                     </select>
                                 </div>
@@ -850,7 +842,7 @@ function initializePurchasePaymentBehavior(form) {
     const statusSelect = form.querySelector('[data-payment-status-select]');
     const methodWrapper = form.querySelector('[data-payment-method-input]');
     const payablesNote = form.querySelector('[data-payables-note]');
-    const methodSelect = methodWrapper?.querySelector('select[name="payment_method"]');
+    const methodSelect = methodWrapper?.querySelector('select[name="payment_method_id"]');
 
     if (!statusSelect || !methodWrapper) {
         return;

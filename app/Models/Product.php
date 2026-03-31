@@ -15,6 +15,9 @@ class Product extends Model
         'company_id',
         'supplier_id',
         'category_id',
+        'revenue_account_id',
+        'inventory_account_id',
+        'cogs_account_id',
         'name',
         'name_ar',
         'code',
@@ -51,6 +54,21 @@ class Product extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function revenueAccount(): BelongsTo
+    {
+        return $this->belongsTo(Account::class, 'revenue_account_id');
+    }
+
+    public function inventoryAccount(): BelongsTo
+    {
+        return $this->belongsTo(Account::class, 'inventory_account_id');
+    }
+
+    public function cogsAccount(): BelongsTo
+    {
+        return $this->belongsTo(Account::class, 'cogs_account_id');
     }
 
     public function purchaseItems(): HasMany
