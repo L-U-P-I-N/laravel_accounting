@@ -1043,16 +1043,17 @@ document.querySelectorAll('[data-purchase-form]').forEach((form) => {
 });
 
 @if ($errors->any())
+@php
+    $purchaseErrorModalId = $activePurchaseModal === 'create'
+        ? 'addPurchaseModal'
+        : (str_starts_with((string) $activePurchaseModal, 'edit-')
+            ? 'editPurchaseModal' . substr((string) $activePurchaseModal, 5)
+            : (str_starts_with((string) $activePurchaseModal, 'payment-')
+                ? 'purchasePaymentModal' . substr((string) $activePurchaseModal, 8)
+                : 'addPurchaseModal'));
+@endphp
 document.addEventListener('DOMContentLoaded', () => {
-    const modalId = @json(
-        $activePurchaseModal === 'create'
-            ? 'addPurchaseModal'
-            : (str_starts_with((string) $activePurchaseModal, 'edit-')
-                ? 'editPurchaseModal' . substr((string) $activePurchaseModal, 5)
-                : (str_starts_with((string) $activePurchaseModal, 'payment-')
-                    ? 'purchasePaymentModal' . substr((string) $activePurchaseModal, 8)
-                    : 'addPurchaseModal'))
-    );
+    const modalId = @json($purchaseErrorModalId);
     const modalElement = document.getElementById(modalId);
 
     if (modalElement && window.bootstrap) {

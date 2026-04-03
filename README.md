@@ -184,3 +184,15 @@ DB_PASSWORD=your_mysql_password
 ```
 
 For InfinityFree, upload the full Laravel app outside `htdocs`, upload the prepared `infinityfree/htdocs` files into `htdocs`, and make sure `storage` and `bootstrap/cache` remain writable.
+
+## Railway Deployment
+
+For Railway production deployment with demo data loaded into MySQL on the first deploy, use the guide in [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md).
+
+The project includes a safe one-time bootstrap command:
+
+```bash
+php artisan app:seed-demo-if-empty
+```
+
+This command seeds demo data only when the database is empty, then rebuilds accounting entries, payments, and inventory movements.
