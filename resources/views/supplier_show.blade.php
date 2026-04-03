@@ -106,7 +106,16 @@
                         <h5 class="mb-1">فواتير المشتريات</h5>
                         <p class="text-muted mb-0">جميع فواتير الشراء المرتبطة بهذا المورد فقط.</p>
                     </div>
-                    <span class="badge text-bg-light">{{ $supplier->purchases->count() }} فاتورة</span>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="badge text-bg-light">{{ $supplier->purchases->count() }} فاتورة</span>
+                        <form method="GET" action="{{ route('suppliers.show', $supplier) }}" class="d-flex align-items-center gap-2">
+                            <select name="sort_direction" class="form-select form-select-sm">
+                                <option value="desc" {{ $sortDirection === 'desc' ? 'selected' : '' }}>الأحدث أولاً</option>
+                                <option value="asc" {{ $sortDirection === 'asc' ? 'selected' : '' }}>الأقدم أولاً</option>
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-outline-primary">ترتيب</button>
+                        </form>
+                    </div>
                 </div>
 
                 <div class="table-responsive">

@@ -365,6 +365,79 @@ class InvoiceCrudTest extends TestCase
         $this->assertSame('deferred', $invoice->payment_status);
     }
 
+    public function test_invoices_page_sorts_by_invoice_date_ascending_when_requested(): void
+    {
+        $company = Company::create([
+            'name' => 'Invoice List Co',
+            'country_code' => 'SA',
+            'currency' => 'SAR',
+        ]);
+
+        $user = User::create([
+            'name' => 'Owner User',
+            'first_name' => 'Owner',
+            'last_name' => 'User',
+            'email' => 'invoice-list@example.com',
+            'password' => bcrypt('password'),
+            'role' => 'owner',
+            'language' => 'ar',
+            'is_active' => true,
+            'must_change_password' => false,
+            'company_id' => $company->id,
+        ]);
+
+        $customer = Customer::create([
+            'company_id' => $company->id,
+            'name' => 'Customer A',
+            'is_active' => true,
+        ]);
+
+        Invoice::create([
+            'invoice_number' => 'INV-OLDER',
+            'customer_id' => $customer->id,
+            'company_id' => $company->id,
+            'invoice_date' => '2026-03-01',
+            'due_date' => '2026-04-01',
+            'subtotal' => 100,
+            'tax_amount' => 15,
+            'total' => 115,
+            'paid_amount' => 0,
+            'balance_due' => 115,
+            'status' => 'sent',
+            'payment_status' => 'deferred',
+            'currency' => 'SAR',
+            'exchange_rate' => 1,
+        ]);
+
+        Invoice::create([
+            'invoice_number' => 'INV-NEWER',
+            'customer_id' => $customer->id,
+            'company_id' => $company->id,
+            'invoice_date' => '2026-03-10',
+            'due_date' => '2026-04-10',
+            'subtotal' => 100,
+            'tax_amount' => 15,
+            'total' => 115,
+            'paid_amount' => 0,
+            'balance_due' => 115,
+            'status' => 'sent',
+            'payment_status' => 'deferred',
+            'currency' => 'SAR',
+            'exchange_rate' => 1,
+        ]);
+
+        $request = Request::create('/invoices', 'GET', [
+            'sort_direction' => 'asc',
+        ]);
+        $request->setUserResolver(fn () => $user);
+
+        $view = app(AccountingPageController::class)->invoices($request);
+        $data = $view->getData();
+
+        $this->assertSame('INV-OLDER', $data['invoices']->first()->invoice_number);
+        $this->assertSame('asc', $data['sortDirection']);
+    }
+
     private function invoiceContext(string $email): array
     {
         $company = Company::create([

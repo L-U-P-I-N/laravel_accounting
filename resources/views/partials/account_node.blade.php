@@ -286,14 +286,9 @@
                 </div>
 
                 <div class="coa-node-actions">
-                    @if ($canManageAccounts)
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></button>
-                            @unless ($account->is_system)
-                                <button type="button" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
-                            @endunless
-                        </div>
-                    @endif
+                    <a href="{{ route('chart_of_accounts.show', $account) }}" class="btn btn-sm btn-outline-primary" title="عرض تفاصيل الحساب">
+                        <i class="fas fa-eye ms-1"></i> عرض
+                    </a>
                 </div>
             </div>
 

@@ -124,4 +124,62 @@ class JournalEntriesPageTest extends TestCase
         $this->assertCount(2, $data['accounts']);
         $this->assertSame($expenseAccount->id, $data['filters']['account_id']);
     }
+
+    public function test_journal_entries_page_sorts_by_entry_date_ascending_when_requested(): void
+    {
+        $company = Company::create([
+            'name' => 'Ledger Sort Co',
+            'country_code' => 'SA',
+            'currency' => 'SAR',
+        ]);
+
+        $user = User::factory()->create([
+            'first_name' => 'Owner',
+            'last_name' => 'User',
+            'name' => 'Owner User',
+            'role' => 'owner',
+            'company_id' => $company->id,
+            'must_change_password' => false,
+            'is_active' => true,
+        ]);
+
+        JournalEntry::create([
+            'entry_number' => 'JRN-OLD',
+            'entry_date' => '2026-03-01',
+            'description' => 'Older entry',
+            'reference' => 'REF-OLD',
+            'entry_type' => 'manual',
+            'entry_origin' => 'manual',
+            'status' => 'posted',
+            'total_debit' => 10,
+            'total_credit' => 10,
+            'company_id' => $company->id,
+            'created_by' => $user->id,
+        ]);
+
+        JournalEntry::create([
+            'entry_number' => 'JRN-NEW',
+            'entry_date' => '2026-03-10',
+            'description' => 'Newer entry',
+            'reference' => 'REF-NEW',
+            'entry_type' => 'manual',
+            'entry_origin' => 'manual',
+            'status' => 'posted',
+            'total_debit' => 20,
+            'total_credit' => 20,
+            'company_id' => $company->id,
+            'created_by' => $user->id,
+        ]);
+
+        $request = Request::create('/journal-entries', 'GET', [
+            'sort_direction' => 'asc',
+        ]);
+        $request->setUserResolver(fn () => $user);
+
+        $view = app(AccountingPageController::class)->journalEntries($request);
+        $data = $view->getData();
+
+        $this->assertSame('JRN-OLD', $data['entries']->first()->entry_number);
+        $this->assertSame('asc', $data['filters']['sort_direction']);
+    }
 }

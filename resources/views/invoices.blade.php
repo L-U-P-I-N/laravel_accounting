@@ -33,12 +33,31 @@
     <ul class="nav nav-pills responsive-pills">
         @foreach ($tabs as $value => $tab)
             <li class="nav-item">
-                <a class="nav-link {{ $statusFilter === $value ? 'active' : '' }}" href="{{ route('invoices', ['status' => $value]) }}">
+                <a class="nav-link {{ $statusFilter === $value ? 'active' : '' }}" href="{{ route('invoices', ['status' => $value, 'sort_direction' => $sortDirection]) }}">
                     <i class="fas {{ $tab['icon'] }} ms-2"></i>{{ $tab['label'] }}
                 </a>
             </li>
         @endforeach
     </ul>
+</div>
+
+<div class="list-card mb-4">
+    <form method="GET" action="{{ route('invoices') }}" class="row g-3 align-items-end">
+        <input type="hidden" name="status" value="{{ $statusFilter }}">
+        <div class="col-lg-3 col-md-6">
+            <label class="form-label">ترتيب التاريخ</label>
+            <select name="sort_direction" class="form-select">
+                <option value="desc" {{ $sortDirection === 'desc' ? 'selected' : '' }}>الأحدث أولاً</option>
+                <option value="asc" {{ $sortDirection === 'asc' ? 'selected' : '' }}>الأقدم أولاً</option>
+            </select>
+        </div>
+        <div class="col-lg-2 col-md-6 d-grid">
+            <button type="submit" class="btn btn-primary">تطبيق</button>
+        </div>
+        <div class="col-lg-2 col-md-6 d-grid">
+            <a href="{{ route('invoices', ['status' => $statusFilter]) }}" class="btn btn-outline-secondary">إعادة تعيين</a>
+        </div>
+    </form>
 </div>
 
 @if ($invoices->isNotEmpty())

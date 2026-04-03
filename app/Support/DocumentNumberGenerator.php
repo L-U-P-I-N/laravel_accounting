@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\JournalEntry;
+use App\Models\Payment;
 use App\Models\Purchase;
 use App\Models\Supplier;
 
@@ -53,6 +54,18 @@ class DocumentNumberGenerator
             count: JournalEntry::query()
                 ->where('company_id', $companyId)
                 ->where('source_type', Supplier::class . ':payment')
+                ->count() + 1,
+            padding: 5,
+        );
+    }
+
+    public function nextPurchasePaymentNumber(int $companyId): string
+    {
+        return $this->numberFromCount(
+            prefix: 'PUR-PMT',
+            count: Payment::query()
+                ->where('company_id', $companyId)
+                ->where('payment_category', 'purchase_payment')
                 ->count() + 1,
             padding: 5,
         );

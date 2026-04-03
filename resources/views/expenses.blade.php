@@ -67,6 +67,13 @@
                         @endforeach
                     </select>
                 </div>
+                <div class="col-lg-2 col-md-6">
+                    <label class="form-label">ترتيب التاريخ</label>
+                    <select name="sort_direction" class="form-select">
+                        <option value="desc" {{ $filters['sort_direction'] === 'desc' ? 'selected' : '' }}>الأحدث أولاً</option>
+                        <option value="asc" {{ $filters['sort_direction'] === 'asc' ? 'selected' : '' }}>الأقدم أولاً</option>
+                    </select>
+                </div>
                 <div class="col-lg-2 col-md-6 d-grid">
                     <button type="submit" class="btn btn-primary"><i class="fas fa-filter ms-1"></i>تطبيق</button>
                 </div>

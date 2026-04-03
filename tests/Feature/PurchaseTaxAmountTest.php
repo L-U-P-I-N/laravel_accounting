@@ -125,6 +125,68 @@ class PurchaseTaxAmountTest extends TestCase
         $this->assertSame(297.0, (float) $item->total);
     }
 
+    public function test_purchase_paid_amount_is_saved_for_partial_and_full_payment(): void
+    {
+        [$company, $user, $supplier, $product] = $this->purchaseContext();
+
+        Storage::fake('public');
+
+        $storeRequest = Request::create('/purchases', 'POST', [
+            'supplier_id' => $supplier->id,
+            'purchase_date' => '2026-03-27',
+            'due_date' => '2026-04-27',
+            'status' => 'draft',
+            'payment_status' => 'partial',
+            'paid_amount' => 50,
+            'payment_date' => '2026-03-27',
+            'supplier_invoice_number' => 'SUP-INV-PAID-001',
+            'item_product_id' => [$product->id],
+            'item_description' => ['Inventory Item'],
+            'item_quantity' => [2],
+            'item_price' => [100],
+            'item_tax_rate' => [15],
+        ]);
+        $storeRequest->setUserResolver(fn () => $user);
+        $storeRequest->files->set('attachment', UploadedFile::fake()->create('invoice.pdf', 150, 'application/pdf'));
+
+        app(AccountingPageController::class)->storePurchase($storeRequest);
+
+        $purchase = Purchase::firstOrFail();
+
+        $this->assertSame('partial', $purchase->payment_status);
+        $this->assertSame(50.0, (float) $purchase->paid_amount);
+        $this->assertSame(180.0, (float) $purchase->balance_due);
+        $this->assertNotNull($purchase->payment_method_id);
+        $this->assertSame('2026-03-27', optional($purchase->payment_date)?->toDateString());
+
+        $updateRequest = Request::create('/purchases/' . $purchase->id, 'PUT', [
+            'supplier_id' => $supplier->id,
+            'purchase_date' => '2026-03-28',
+            'due_date' => '2026-04-30',
+            'status' => 'approved',
+            'payment_status' => 'paid',
+            'paid_amount' => 999,
+            'payment_date' => '2026-03-28',
+            'supplier_invoice_number' => 'SUP-INV-PAID-001',
+            'item_product_id' => [$product->id],
+            'item_description' => ['Inventory Item'],
+            'item_quantity' => [2],
+            'item_price' => [100],
+            'item_tax_rate' => [15],
+        ]);
+        $updateRequest->setUserResolver(fn () => $user);
+
+        app(AccountingPageController::class)->updatePurchase($updateRequest, $purchase);
+
+        $purchase->refresh();
+
+        $this->assertSame('paid', $purchase->payment_status);
+        $this->assertSame(230.0, (float) $purchase->paid_amount);
+        $this->assertSame(0.0, (float) $purchase->balance_due);
+        $this->assertNotNull($purchase->payment_method_id);
+        $this->assertSame('2026-03-28', optional($purchase->payment_date)?->toDateString());
+    }
+
     public function test_approved_purchase_uses_configured_input_tax_account(): void
     {
         [$company, $user, $supplier, $product] = $this->purchaseContext();

@@ -146,6 +146,81 @@ class RegistrationAndCustomerShowTest extends TestCase
         $this->assertSame(115.0, (float) $data['customer']->balance);
     }
 
+    public function test_customer_show_sorts_invoices_by_date_ascending_when_requested(): void
+    {
+        $company = Company::create([
+            'name' => 'Customer Sort Co',
+            'country_code' => 'SA',
+            'city' => 'الرياض',
+            'currency' => 'SAR',
+        ]);
+
+        $user = User::create([
+            'name' => 'Owner User',
+            'first_name' => 'Owner',
+            'last_name' => 'User',
+            'email' => 'customer-sort@example.com',
+            'password' => bcrypt('password'),
+            'role' => 'owner',
+            'language' => 'ar',
+            'is_active' => true,
+            'must_change_password' => false,
+            'company_id' => $company->id,
+        ]);
+
+        $customer = Customer::create([
+            'company_id' => $company->id,
+            'name' => 'Customer Sort',
+            'is_active' => true,
+        ]);
+
+        Invoice::create([
+            'invoice_number' => 'INV-2',
+            'customer_id' => $customer->id,
+            'company_id' => $company->id,
+            'invoice_date' => '2026-03-20',
+            'due_date' => '2026-04-20',
+            'subtotal' => 100,
+            'tax_amount' => 15,
+            'total' => 115,
+            'paid_amount' => 0,
+            'balance_due' => 115,
+            'status' => 'sent',
+            'payment_status' => 'pending',
+            'currency' => 'SAR',
+            'exchange_rate' => 1,
+        ]);
+
+        Invoice::create([
+            'invoice_number' => 'INV-1',
+            'customer_id' => $customer->id,
+            'company_id' => $company->id,
+            'invoice_date' => '2026-03-05',
+            'due_date' => '2026-04-05',
+            'subtotal' => 100,
+            'tax_amount' => 15,
+            'total' => 115,
+            'paid_amount' => 0,
+            'balance_due' => 115,
+            'status' => 'sent',
+            'payment_status' => 'pending',
+            'currency' => 'SAR',
+            'exchange_rate' => 1,
+        ]);
+
+        $request = Request::create('/customers/' . $customer->id, 'GET', [
+            'sort_direction' => 'asc',
+        ]);
+        $request->setUserResolver(fn () => $user);
+        view()->share('errors', new ViewErrorBag());
+
+        $view = app(AccountingPageController::class)->showCustomer($request, $customer);
+        $data = $view->getData();
+
+        $this->assertSame('INV-1', $data['customer']->invoices->first()->invoice_number);
+        $this->assertSame('asc', $data['sortDirection']);
+    }
+
     public function test_customers_page_filters_by_city_and_status(): void
     {
         $company = Company::create([

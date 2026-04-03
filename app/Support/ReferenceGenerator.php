@@ -28,4 +28,9 @@ class ReferenceGenerator
     {
         return $this->fromIdentifier($this->documentNumberGenerator->nextSupplierPaymentNumber($companyId));
     }
+
+    public function nextPurchasePaymentReference(int $companyId): string
+    {
+        return $this->fromIdentifier($this->documentNumberGenerator->nextPurchasePaymentNumber($companyId));
+    }
 }

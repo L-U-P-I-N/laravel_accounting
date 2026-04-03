@@ -11,7 +11,9 @@ use App\Models\Employee;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\InventoryMovement;
 use App\Models\JournalEntry;
+use App\Models\JournalLine;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\Product;
@@ -24,6 +26,8 @@ use App\Models\User;
 use App\Support\AccountingService;
 use App\Support\ChartOfAccountsSynchronizer;
 use App\Support\DocumentNumberGenerator;
+use App\Support\InventoryMovementService;
+use App\Support\PaymentSyncService;
 use App\Support\ReferenceGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -45,6 +49,8 @@ class AccountingPageController extends Controller
         private readonly AccountingService $accountingService,
         private readonly ChartOfAccountsSynchronizer $chartOfAccountsSynchronizer,
         private readonly DocumentNumberGenerator $documentNumberGenerator,
+        private readonly InventoryMovementService $inventoryMovementService,
+        private readonly PaymentSyncService $paymentSyncService,
         private readonly ReferenceGenerator $referenceGenerator,
     )
     {
@@ -54,6 +60,7 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
         $statusFilter = $request->string('status')->toString() ?: 'all';
+        $sortDirection = $this->sortDirection($request);
         $tabs = [
             'all' => ['label' => 'جميع المبيعات', 'icon' => 'fa-list'],
             'draft' => ['label' => 'مسودة', 'icon' => 'fa-edit'],
@@ -65,14 +72,15 @@ class AccountingPageController extends Controller
         $invoices = Invoice::with('customer')
             ->where('company_id', $company->id)
             ->when($statusFilter !== 'all', fn ($query) => $query->where('status', $statusFilter))
-            ->orderByDesc('invoice_date')
+            ->orderBy('invoice_date', $sortDirection)
+            ->orderBy('id', $sortDirection)
             ->get();
 
         $customers = Customer::where('company_id', $company->id)
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        return view('invoices', compact('company', 'invoices', 'statusFilter', 'tabs', 'customers'));
+        return view('invoices', compact('company', 'invoices', 'statusFilter', 'tabs', 'customers', 'sortDirection'));
     }
 
     public function invoiceCreate(Request $request): View
@@ -139,9 +147,17 @@ class AccountingPageController extends Controller
 
             $this->syncInvoiceItems($invoice, $validated);
 
+            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentMethod']);
+            $journalEntry = null;
+
             if (($validated['status'] ?? 'sent') !== 'draft') {
-                $this->accountingService->syncInvoiceEntry($invoice->fresh(['items.product', 'customer']), $user);
+                $journalEntry = $this->accountingService->syncInvoiceEntry($freshInvoice, $user);
+                $this->inventoryMovementService->syncInvoice($freshInvoice);
+            } else {
+                $this->inventoryMovementService->deleteForSource($invoice);
             }
+
+            $this->paymentSyncService->syncInvoicePayment($freshInvoice, $journalEntry);
 
             return $invoice;
         });
@@ -204,11 +220,18 @@ class AccountingPageController extends Controller
 
             $this->syncInvoiceItems($invoice, $validated);
 
+            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentMethod']);
+            $journalEntry = null;
+
             if ($this->shouldConsumeInvoiceStock($nextStatus)) {
-                $this->accountingService->syncInvoiceEntry($invoice->fresh(['items.product', 'customer']), $user);
+                $journalEntry = $this->accountingService->syncInvoiceEntry($freshInvoice, $user);
+                $this->inventoryMovementService->syncInvoice($freshInvoice);
             } else {
                 $this->accountingService->deleteAutomaticEntriesForSource($invoice);
+                $this->inventoryMovementService->deleteForSource($invoice);
             }
+
+            $this->paymentSyncService->syncInvoicePayment($freshInvoice, $journalEntry);
         });
 
         return redirect()->route('invoices.show', $invoice)->with('status', 'تم تحديث الفاتورة وتعديل المخزون المرتبط بها بنجاح.');
@@ -234,6 +257,8 @@ class AccountingPageController extends Controller
                 Storage::disk('public')->delete($invoice->attachment_path);
             }
 
+            $this->paymentSyncService->deleteInvoicePayments($invoice);
+            $this->inventoryMovementService->deleteForSource($invoice);
             $this->accountingService->deleteAutomaticEntriesForSource($invoice);
             $invoice->delete();
         });
@@ -294,7 +319,10 @@ class AccountingPageController extends Controller
             $this->consumeInvoiceStock($company->id, $stockRequirements);
 
             $invoice->update(['status' => 'sent']);
-            $this->accountingService->syncInvoiceEntry($invoice->fresh(['items.product', 'customer']), $user);
+            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentMethod']);
+            $journalEntry = $this->accountingService->syncInvoiceEntry($freshInvoice, $user);
+            $this->inventoryMovementService->syncInvoice($freshInvoice);
+            $this->paymentSyncService->syncInvoicePayment($freshInvoice, $journalEntry);
         });
 
         return redirect()->route('invoices')->with('status', 'تم اعتماد الفاتورة وإرسالها بنجاح.');
@@ -307,15 +335,26 @@ class AccountingPageController extends Controller
         $supplierFilter = $request->string('supplier_id')->toString();
         $dateFrom = $request->string('date_from')->toString();
         $dateTo = $request->string('date_to')->toString();
+        $sortDirection = $this->sortDirection($request);
         $defaultPaymentMethodId = $this->defaultPaymentMethodId($company->id);
 
-        $purchases = Purchase::with(['supplier', 'items.product', 'paymentMethod'])
+        $purchases = Purchase::with([
+                'supplier',
+                'items.product',
+                'paymentMethod',
+                'payments' => fn ($query) => $query
+                    ->where('payment_category', 'purchase_payment')
+                    ->with('paymentMethod')
+                    ->orderBy('payment_date', $sortDirection)
+                    ->orderBy('id', $sortDirection),
+            ])
             ->where('company_id', $company->id)
             ->when($statusFilter !== '', fn ($query) => $query->where('status', $statusFilter))
             ->when($supplierFilter !== '', fn ($query) => $query->where('supplier_id', $supplierFilter))
             ->when($dateFrom !== '', fn ($query) => $query->whereDate('purchase_date', '>=', $dateFrom))
             ->when($dateTo !== '', fn ($query) => $query->whereDate('purchase_date', '<=', $dateTo))
-            ->orderByDesc('purchase_date')
+            ->orderBy('purchase_date', $sortDirection)
+            ->orderBy('id', $sortDirection)
             ->get();
 
         $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get();
@@ -338,6 +377,7 @@ class AccountingPageController extends Controller
             'supplierFilter' => $supplierFilter,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'sortDirection' => $sortDirection,
             'defaultPaymentMethodId' => $defaultPaymentMethodId,
             'pendingPurchasesCount' => $pendingPurchasesCount,
             'paidPurchasesCount' => $paidPurchasesCount,
@@ -348,14 +388,15 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
         $validated = $this->validatePurchaseData($request, $company->id);
-        $paymentStatus = $validated['payment_status'] ?? 'pending';
+        $paymentData = $this->resolvePurchasePaymentData($validated, $this->calculatePurchaseTotals($validated));
+        $paymentStatus = $paymentData['payment_status'];
         $paymentMethodId = $paymentStatus === 'pending' ? null : ($validated['payment_method_id'] ?? null);
         $paymentDate = $paymentStatus === 'pending' ? null : ($validated['payment_date'] ?? null);
 
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        DB::transaction(function () use ($company, $validated, $user, $request, $paymentStatus, $paymentMethodId, $paymentDate) {
+        DB::transaction(function () use ($company, $validated, $user, $request, $paymentData, $paymentStatus, $paymentMethodId, $paymentDate) {
             $totals = $this->calculatePurchaseTotals($validated);
             $attachmentPath = $this->handlePurchaseAttachmentUpload($request);
 
@@ -370,8 +411,8 @@ class AccountingPageController extends Controller
                 'subtotal' => $totals['subtotal'],
                 'tax_amount' => $totals['tax_amount'],
                 'total' => $totals['total'],
-                'paid_amount' => 0,
-                'balance_due' => $totals['total'],
+                'paid_amount' => $paymentData['paid_amount'],
+                'balance_due' => $paymentData['balance_due'],
                 'status' => $validated['status'] ?? 'draft',
                 'payment_status' => $paymentStatus,
                 'payment_method_id' => $paymentMethodId,
@@ -383,7 +424,20 @@ class AccountingPageController extends Controller
             ]);
 
             $this->syncPurchaseItems($purchase, $validated);
-            $this->accountingService->syncPurchaseEntry($purchase->fresh(['items.product', 'supplier']), $user);
+
+            if ($this->shouldReceivePurchaseStock((string) $purchase->status)) {
+                $this->applyPurchaseStock($company->id, $this->purchaseStockRequirementsFromValidated($validated));
+            }
+
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentMethod']);
+            $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
+            $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
+
+            if ($this->shouldReceivePurchaseStock((string) $freshPurchase->status)) {
+                $this->inventoryMovementService->syncPurchase($freshPurchase);
+            } else {
+                $this->inventoryMovementService->deleteForSource($purchase);
+            }
         });
 
         return redirect()->route('purchases')->with('status', 'تم إنشاء طلب الشراء بنجاح.');
@@ -395,14 +449,29 @@ class AccountingPageController extends Controller
         abort_if((int) $purchase->company_id !== (int) $company->id, 404);
 
         $validated = $this->validatePurchaseData($request, $company->id, $purchase);
-        $paymentStatus = $validated['payment_status'] ?? $purchase->payment_status;
+        $existingRecordedPayments = $purchase->payments()
+            ->where('payment_category', 'purchase_payment')
+            ->count();
+        $paymentData = $this->resolvePurchasePaymentData(
+            $validated,
+            $this->calculatePurchaseTotals($validated),
+            $existingRecordedPayments > 1 ? (float) $purchase->paid_amount : null,
+        );
+        $paymentStatus = $paymentData['payment_status'] ?? $purchase->payment_status;
         $paymentMethodId = $paymentStatus === 'pending' ? null : ($validated['payment_method_id'] ?? null);
         $paymentDate = $paymentStatus === 'pending' ? null : ($validated['payment_date'] ?? null);
 
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        DB::transaction(function () use ($purchase, $validated, $company, $user, $request, $paymentStatus, $paymentMethodId, $paymentDate) {
+        DB::transaction(function () use ($purchase, $validated, $company, $user, $request, $paymentData, $paymentStatus, $paymentMethodId, $paymentDate) {
+            $purchase->loadMissing(['items.product']);
+            $hadAppliedStock = $this->inventoryMovementService->hasMovementsForSource($purchase);
+
+            if ($this->shouldReceivePurchaseStock((string) $purchase->status) && $hadAppliedStock) {
+                $this->reversePurchaseStock($company->id, $this->purchaseStockRequirementsFromItems($purchase->items));
+            }
+
             $totals = $this->calculatePurchaseTotals($validated);
             $attachmentPath = $this->handlePurchaseAttachmentUpload($request, $purchase);
 
@@ -415,7 +484,8 @@ class AccountingPageController extends Controller
                 'subtotal' => $totals['subtotal'],
                 'tax_amount' => $totals['tax_amount'],
                 'total' => $totals['total'],
-                'balance_due' => max($totals['total'] - (float) $purchase->paid_amount, 0),
+                'paid_amount' => $paymentData['paid_amount'],
+                'balance_due' => $paymentData['balance_due'],
                 'status' => $validated['status'] ?? $purchase->status,
                 'payment_status' => $paymentStatus,
                 'payment_method_id' => $paymentMethodId,
@@ -426,7 +496,20 @@ class AccountingPageController extends Controller
             ]);
 
             $this->syncPurchaseItems($purchase, $validated);
-            $this->accountingService->syncPurchaseEntry($purchase->fresh(['items.product', 'supplier']), $user);
+
+            if ($this->shouldReceivePurchaseStock((string) $purchase->status)) {
+                $this->applyPurchaseStock($company->id, $this->purchaseStockRequirementsFromValidated($validated));
+            }
+
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentMethod']);
+            $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
+            $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
+
+            if ($this->shouldReceivePurchaseStock((string) $freshPurchase->status)) {
+                $this->inventoryMovementService->syncPurchase($freshPurchase);
+            } else {
+                $this->inventoryMovementService->deleteForSource($purchase);
+            }
         });
 
         return redirect()->route('purchases')->with('status', 'تم تحديث طلب الشراء بنجاح.');
@@ -441,11 +524,110 @@ class AccountingPageController extends Controller
             return redirect()->route('purchases')->with('status', 'لا يمكن اعتماد طلب الشراء في حالته الحالية.');
         }
 
-        $purchase->update([
-            'status' => 'approved',
-        ]);
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        DB::transaction(function () use ($purchase, $user) {
+            $purchase->loadMissing(['items.product', 'supplier', 'paymentMethod']);
+
+            if (! $this->inventoryMovementService->hasMovementsForSource($purchase)) {
+                $this->applyPurchaseStock((int) $purchase->company_id, $this->purchaseStockRequirementsFromItems($purchase->items));
+            }
+
+            $purchase->update([
+                'status' => 'approved',
+            ]);
+
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentMethod']);
+            $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
+            $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
+            $this->inventoryMovementService->syncPurchase($freshPurchase);
+        });
 
         return redirect()->route('purchases')->with('status', 'تم اعتماد طلب الشراء بنجاح.');
+    }
+
+    public function storePurchasePayment(Request $request, Purchase $purchase): RedirectResponse
+    {
+        $company = $this->company($request);
+        abort_if((int) $purchase->company_id !== (int) $company->id, 404);
+
+        if (in_array((string) $purchase->status, ['draft', 'cancelled'], true)) {
+            return redirect()->route('purchases')->with('error', 'لا يمكن تسجيل دفعة على طلب شراء مسودة أو ملغي.');
+        }
+
+        if ((float) $purchase->balance_due <= 0) {
+            return redirect()->route('purchases')->with('error', 'لا يوجد رصيد متبق على طلب الشراء المحدد.');
+        }
+
+        $validated = $request->validate([
+            'purchase_modal' => ['nullable', 'string'],
+            'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max((float) $purchase->balance_due, 0.01)],
+            'payment_date' => ['required', 'date'],
+            'payment_method_id' => [
+                'nullable',
+                Rule::exists('payment_methods', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+            ],
+            'payment_reference' => ['nullable', 'string', 'max:100'],
+            'payment_notes' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'payment_amount.max' => 'مبلغ الدفعة أكبر من الرصيد المتبقي على طلب الشراء.',
+        ]);
+
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        $paymentAmount = round((float) $validated['payment_amount'], 2);
+        $paymentDate = Carbon::parse($validated['payment_date'])->toDateString();
+        $paymentMethodId = isset($validated['payment_method_id'])
+            ? (int) $validated['payment_method_id']
+            : $this->defaultPaymentMethodId($company->id);
+        $paymentReference = trim((string) ($validated['payment_reference'] ?? ''));
+
+        if ($paymentReference === '') {
+            $paymentReference = $this->referenceGenerator->nextPurchasePaymentReference($company->id);
+        }
+
+        DB::transaction(function () use ($purchase, $paymentAmount, $paymentDate, $paymentMethodId, $paymentReference, $validated, $user) {
+            $lockedPurchase = Purchase::query()
+                ->with('supplier')
+                ->whereKey($purchase->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $appliedAmount = min($paymentAmount, round((float) $lockedPurchase->balance_due, 2));
+            $updatedPaidAmount = round((float) $lockedPurchase->paid_amount + $appliedAmount, 2);
+            $updatedBalance = round(max((float) $lockedPurchase->total - $updatedPaidAmount, 0), 2);
+
+            $lockedPurchase->update([
+                'paid_amount' => $updatedPaidAmount,
+                'balance_due' => $updatedBalance,
+                'payment_status' => $this->purchasePaymentStatus($updatedPaidAmount, (float) $lockedPurchase->total),
+                'status' => $this->purchaseStatusAfterPayment((string) $lockedPurchase->status, $updatedPaidAmount, $updatedBalance),
+                'payment_method_id' => $paymentMethodId,
+                'payment_method' => null,
+                'payment_date' => $paymentDate,
+            ]);
+
+            $journalEntry = $this->accountingService->createSupplierPaymentEntry(
+                $lockedPurchase->supplier,
+                $appliedAmount,
+                $user,
+                $paymentReference,
+            );
+
+            $this->paymentSyncService->recordPurchasePayment(
+                purchase: $lockedPurchase,
+                amount: $appliedAmount,
+                paymentDate: $paymentDate,
+                reference: $paymentReference,
+                entry: $journalEntry,
+                paymentMethodId: $paymentMethodId,
+                notes: trim((string) ($validated['payment_notes'] ?? '')) ?: null,
+            );
+        });
+
+        return redirect()->route('purchases')->with('status', 'تم تسجيل دفعة شراء بمبلغ ' . number_format($paymentAmount, 2) . ' ' . $company->currency . '.');
     }
 
     public function destroyPurchase(Request $request, Purchase $purchase): RedirectResponse
@@ -457,7 +639,15 @@ class AccountingPageController extends Controller
             return redirect()->route('purchases')->with('status', 'لا يمكن حذف طلب شراء تم تسجيل دفعات عليه.');
         }
 
-        DB::transaction(function () use ($purchase) {
+        DB::transaction(function () use ($purchase, $company) {
+            $purchase->loadMissing(['items.product']);
+
+            if ($this->shouldReceivePurchaseStock((string) $purchase->status) && $this->inventoryMovementService->hasMovementsForSource($purchase)) {
+                $this->reversePurchaseStock($company->id, $this->purchaseStockRequirementsFromItems($purchase->items));
+            }
+
+            $this->paymentSyncService->deletePurchasePayments($purchase);
+            $this->inventoryMovementService->deleteForSource($purchase);
             $this->accountingService->deleteAutomaticEntriesForSource($purchase);
 
             if ($purchase->attachment_path) {
@@ -546,16 +736,17 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         abort_if((int) $customer->company_id !== (int) $company->id, 404);
         $companyCountry = $this->countryConfigForCompany($company);
+        $sortDirection = $this->sortDirection($request);
 
         $customer->load([
-            'invoices' => fn ($query) => $query->orderByDesc('invoice_date'),
+            'invoices' => fn ($query) => $query->orderBy('invoice_date', $sortDirection)->orderBy('id', $sortDirection),
         ]);
 
         $customer->code = $customer->code ?: 'CUS-' . str_pad((string) $customer->id, 4, '0', STR_PAD_LEFT);
         $customer->balance = (float) $customer->invoices->sum('balance_due');
         $customer->invoices_total = (float) $customer->invoices->sum('total');
 
-        return view('customer_show', compact('company', 'customer', 'companyCountry'));
+        return view('customer_show', compact('company', 'customer', 'companyCountry', 'sortDirection'));
     }
 
     public function storeCustomer(Request $request): RedirectResponse
@@ -643,9 +834,10 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         abort_if((int) $supplier->company_id !== (int) $company->id, 404);
         $companyCountry = $this->countryConfigForCompany($company);
+        $sortDirection = $this->sortDirection($request);
 
         $supplier->load([
-            'purchases' => fn ($query) => $query->orderByDesc('purchase_date'),
+            'purchases' => fn ($query) => $query->orderBy('purchase_date', $sortDirection)->orderBy('id', $sortDirection),
             'products' => fn ($query) => $query->orderBy('name'),
         ])->loadCount(['products', 'purchases']);
 
@@ -655,7 +847,7 @@ class AccountingPageController extends Controller
 
         $suggestedPaymentReference = $this->referenceGenerator->nextSupplierPaymentReference($company->id);
 
-        return view('supplier_show', compact('company', 'supplier', 'suggestedPaymentReference', 'companyCountry'));
+        return view('supplier_show', compact('company', 'supplier', 'suggestedPaymentReference', 'companyCountry', 'sortDirection'));
     }
 
     public function storeSupplier(Request $request): RedirectResponse
@@ -734,7 +926,9 @@ class AccountingPageController extends Controller
             $paymentReference = $this->referenceGenerator->nextSupplierPaymentReference($company->id);
         }
 
-        DB::transaction(function () use ($supplier, $paymentAmount, $user, $paymentReference) {
+        $defaultPaymentMethodId = $this->defaultPaymentMethodId((int) $supplier->company_id);
+
+        DB::transaction(function () use ($supplier, $paymentAmount, $user, $paymentReference, $defaultPaymentMethodId) {
             $remainingAmount = $paymentAmount;
 
             $openPurchases = Purchase::where('company_id', $supplier->company_id)
@@ -765,7 +959,15 @@ class AccountingPageController extends Controller
                 $remainingAmount = round($remainingAmount - $appliedAmount, 2);
             }
 
-            $this->accountingService->createSupplierPaymentEntry($supplier, $paymentAmount, $user, $paymentReference);
+            $journalEntry = $this->accountingService->createSupplierPaymentEntry($supplier, $paymentAmount, $user, $paymentReference);
+            $this->paymentSyncService->recordSupplierPayment(
+                supplier: $supplier,
+                amount: $paymentAmount,
+                paymentDate: now()->toDateString(),
+                reference: $paymentReference,
+                entry: $journalEntry,
+                paymentMethodId: $defaultPaymentMethodId,
+            );
         });
 
         return redirect()->route('suppliers.show', $supplier)->with('status', 'تم تسجيل دفعة بمبلغ ' . number_format($paymentAmount, 2) . ' ' . $company->currency . ' وخصمها من الرصيد المستحق.');
@@ -810,6 +1012,7 @@ class AccountingPageController extends Controller
             'search' => ['nullable', 'string', 'max:255'],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'expense_account_id' => [
                 'nullable',
                 Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
@@ -820,9 +1023,11 @@ class AccountingPageController extends Controller
             ],
         ]);
 
+        $sortDirection = $filters['sort_direction'] ?? 'desc';
+
         $expenses = $this->expenseReportQuery($company->id, $filters)
-            ->orderByDesc('expense_date')
-            ->orderByDesc('id')
+            ->orderBy('expense_date', $sortDirection)
+            ->orderBy('id', $sortDirection)
             ->get();
 
         $expenseAccounts = Account::where('company_id', $company->id)
@@ -832,8 +1037,8 @@ class AccountingPageController extends Controller
             ->get();
 
         $expenseTargets = Expense::where('company_id', $company->id)
-            ->orderByDesc('expense_date')
-            ->orderByDesc('id')
+            ->orderBy('expense_date', $sortDirection)
+            ->orderBy('id', $sortDirection)
             ->get(['id', 'name', 'reference', 'expense_date']);
 
         $paymentAccounts = Account::where('company_id', $company->id)
@@ -863,6 +1068,7 @@ class AccountingPageController extends Controller
                 'search' => (string) ($filters['search'] ?? ''),
                 'date_from' => (string) ($filters['date_from'] ?? ''),
                 'date_to' => (string) ($filters['date_to'] ?? ''),
+                'sort_direction' => $sortDirection,
                 'expense_account_id' => isset($filters['expense_account_id']) ? (int) $filters['expense_account_id'] : null,
                 'expense_id' => isset($filters['expense_id']) ? (int) $filters['expense_id'] : null,
             ],
@@ -1052,6 +1258,41 @@ class AccountingPageController extends Controller
         ));
     }
 
+    public function showAccount(Request $request, Account $account): View
+    {
+        $company = $this->company($request);
+        abort_if((int) $account->company_id !== (int) $company->id, 404);
+
+        $account->load([
+            'parent',
+            'children' => fn ($query) => $query->orderBy('code'),
+        ])->loadCount(['children', 'journalLines']);
+
+        $ancestors = $this->accountAncestors($account);
+        $recentJournalLines = JournalLine::query()
+            ->with(['journalEntry', 'account'])
+            ->where('account_id', $account->id)
+            ->whereHas('journalEntry', fn ($query) => $query->where('company_id', $company->id))
+            ->latest('journal_entry_id')
+            ->limit(12)
+            ->get();
+
+        $hierarchyLabel = match (true) {
+            $account->parent_id === null && $account->children_count > 0 => 'حساب جذري أب',
+            $account->parent_id === null => 'حساب جذري نهائي',
+            $account->children_count > 0 => 'حساب أب فرعي',
+            default => 'حساب فرعي نهائي',
+        };
+
+        return view('account_show', compact(
+            'company',
+            'account',
+            'ancestors',
+            'recentJournalLines',
+            'hierarchyLabel',
+        ));
+    }
+
     public function storeAccount(Request $request): RedirectResponse
     {
         $company = $this->company($request);
@@ -1100,6 +1341,7 @@ class AccountingPageController extends Controller
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', Rule::in(['draft', 'posted', 'reversed'])],
+            'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'account_id' => [
                 'nullable',
                 Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
@@ -1107,6 +1349,8 @@ class AccountingPageController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
         ]);
+
+        $sortDirection = $filters['sort_direction'] ?? 'desc';
 
         $entries = JournalEntry::with(['lines.account'])
             ->where('company_id', $company->id)
@@ -1125,8 +1369,8 @@ class AccountingPageController extends Controller
             ->when(! empty($filters['account_id']), function ($query) use ($filters) {
                 $query->whereHas('lines', fn ($linesQuery) => $linesQuery->where('account_id', $filters['account_id']));
             })
-            ->orderByDesc('entry_date')
-            ->orderByDesc('id')
+            ->orderBy('entry_date', $sortDirection)
+            ->orderBy('id', $sortDirection)
             ->get();
 
         $accounts = Account::where('company_id', $company->id)
@@ -1143,6 +1387,7 @@ class AccountingPageController extends Controller
                 'account_id' => isset($filters['account_id']) ? (int) $filters['account_id'] : null,
                 'date_from' => (string) ($filters['date_from'] ?? ''),
                 'date_to' => (string) ($filters['date_to'] ?? ''),
+                'sort_direction' => $sortDirection,
             ],
         ]);
     }
@@ -1193,6 +1438,103 @@ class AccountingPageController extends Controller
         $sourceContext = $this->journalEntrySourceContext($journalEntry);
 
         return view('journal_entry_show', compact('company', 'journalEntry', 'sourceContext'));
+    }
+
+    public function operationsActivityReport(Request $request): View
+    {
+        $company = $this->company($request);
+        $validated = $request->validate([
+            'group_by' => ['nullable', Rule::in(['day', 'reference'])],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'reference' => ['nullable', 'string', 'max:100'],
+            'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
+        ]);
+
+        $groupBy = $validated['group_by'] ?? 'day';
+        $dateFrom = $validated['date_from'] ?? now()->subDays(29)->toDateString();
+        $dateTo = $validated['date_to'] ?? now()->toDateString();
+        $reference = trim((string) ($validated['reference'] ?? ''));
+        $sortDirection = $validated['sort_direction'] ?? 'desc';
+
+        $payments = Payment::query()
+            ->with(['purchase.supplier', 'invoice.customer', 'supplier', 'paymentMethod'])
+            ->where('company_id', $company->id)
+            ->whereBetween('payment_date', [$dateFrom, $dateTo])
+            ->when($reference !== '', fn ($query) => $query->where('reference', 'like', '%' . $reference . '%'))
+            ->orderBy('payment_date', $sortDirection)
+            ->orderBy('id', $sortDirection)
+            ->get();
+
+        $inventoryMovements = InventoryMovement::query()
+            ->with('product')
+            ->where('company_id', $company->id)
+            ->whereBetween('movement_date', [$dateFrom, $dateTo])
+            ->when($reference !== '', fn ($query) => $query->where('reference_number', 'like', '%' . $reference . '%'))
+            ->orderBy('movement_date', $sortDirection)
+            ->orderBy('id', $sortDirection)
+            ->get();
+
+        $paymentGroups = $payments
+            ->groupBy(function (Payment $payment) use ($groupBy) {
+                if ($groupBy === 'reference') {
+                    return $payment->reference ?: 'بدون مرجع';
+                }
+
+                return optional($payment->payment_date)->format('Y-m-d') ?: 'بدون تاريخ';
+            })
+            ->map(function (Collection $rows, string $label) {
+                return [
+                    'label' => $label,
+                    'count' => $rows->count(),
+                    'in_total' => round((float) $rows->where('payment_direction', 'in')->sum('amount'), 2),
+                    'out_total' => round((float) $rows->where('payment_direction', 'out')->sum('amount'), 2),
+                ];
+            })
+            ->values();
+
+        $movementGroups = $inventoryMovements
+            ->groupBy(function (InventoryMovement $movement) use ($groupBy) {
+                if ($groupBy === 'reference') {
+                    return $movement->reference_number ?: 'بدون مرجع';
+                }
+
+                return optional($movement->movement_date)->format('Y-m-d') ?: 'بدون تاريخ';
+            })
+            ->map(function (Collection $rows, string $label) {
+                return [
+                    'label' => $label,
+                    'count' => $rows->count(),
+                    'incoming_quantity' => round((float) $rows->where('direction', 'in')->sum('quantity'), 2),
+                    'outgoing_quantity' => round((float) $rows->where('direction', 'out')->sum('quantity'), 2),
+                    'inventory_cost' => round((float) $rows->sum('total_cost'), 2),
+                ];
+            })
+            ->values();
+
+        return view('reports.operations_activity', [
+            'company' => $company,
+            'groupBy' => $groupBy,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'reference' => $reference,
+            'sortDirection' => $sortDirection,
+            'payments' => $payments,
+            'inventoryMovements' => $inventoryMovements,
+            'paymentGroups' => $paymentGroups,
+            'movementGroups' => $movementGroups,
+            'paymentSummary' => [
+                'incoming' => round((float) $payments->where('payment_direction', 'in')->sum('amount'), 2),
+                'outgoing' => round((float) $payments->where('payment_direction', 'out')->sum('amount'), 2),
+                'count' => $payments->count(),
+            ],
+            'movementSummary' => [
+                'incoming_quantity' => round((float) $inventoryMovements->where('direction', 'in')->sum('quantity'), 2),
+                'outgoing_quantity' => round((float) $inventoryMovements->where('direction', 'out')->sum('quantity'), 2),
+                'count' => $inventoryMovements->count(),
+                'inventory_cost' => round((float) $inventoryMovements->sum('total_cost'), 2),
+            ],
+        ]);
     }
 
     public function reports(Request $request): View
@@ -3573,7 +3915,7 @@ class AccountingPageController extends Controller
         $rootCodes = [
             'asset' => '1',
             'liability' => '2',
-            'equity' => null,
+            'equity' => '5',
             'revenue' => '3',
             'expense' => '4',
             'cogs' => '4',
@@ -3638,6 +3980,32 @@ class AccountingPageController extends Controller
         return $this->nestAccounts($accounts, null);
     }
 
+    private function sortDirection(Request $request, string $parameter = 'sort_direction', string $default = 'desc'): string
+    {
+        $value = strtolower($request->string($parameter)->toString());
+
+        return in_array($value, ['asc', 'desc'], true) ? $value : $default;
+    }
+
+    private function accountAncestors(Account $account): Collection
+    {
+        $ancestors = collect();
+        $currentParentId = $account->parent_id;
+
+        while ($currentParentId) {
+            $parent = Account::query()->find($currentParentId);
+
+            if (! $parent) {
+                break;
+            }
+
+            $ancestors->prepend($parent);
+            $currentParentId = $parent->parent_id;
+        }
+
+        return $ancestors;
+    }
+
     private function buildFilteredAccountTree(Collection $allAccounts, Collection $matchingAccounts): Collection
     {
         $includedIds = [];
@@ -3673,7 +4041,7 @@ class AccountingPageController extends Controller
         $rootCodes = [
             'asset' => '1',
             'liability' => '2',
-            'equity' => null,
+            'equity' => '5',
             'revenue' => '3',
             'expense' => '4',
             'cogs' => '4',
@@ -3777,6 +4145,7 @@ class AccountingPageController extends Controller
             'due_date' => ['nullable', 'date', 'after_or_equal:purchase_date'],
             'status' => ['nullable', Rule::in(['draft', 'pending', 'approved'])],
             'payment_status' => ['required', Rule::in(['pending', 'partial', 'paid'])],
+            'paid_amount' => ['nullable', 'numeric', 'min:0'],
             'payment_method_id' => [
                 'nullable',
                 Rule::exists('payment_methods', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
@@ -3799,9 +4168,15 @@ class AccountingPageController extends Controller
             'item_tax_rate.*' => ['nullable', 'numeric', 'min:0', 'max:100'],
         ]);
 
-        if (($validated['payment_status'] ?? 'pending') === 'pending') {
+        $totals = $this->calculatePurchaseTotals($validated);
+        $enteredPaidAmount = round((float) ($validated['paid_amount'] ?? 0), 2);
+        $requestedPaymentStatus = $validated['payment_status'] ?? 'pending';
+        $validated['payment_status'] = $requestedPaymentStatus;
+
+        if ($requestedPaymentStatus === 'pending') {
             $validated['payment_method_id'] = null;
             $validated['payment_date'] = null;
+            $validated['paid_amount'] = 0;
         } else {
             $validated['payment_method_id'] = $validated['payment_method_id'] ?? $this->defaultPaymentMethodId($companyId);
 
@@ -3810,6 +4185,24 @@ class AccountingPageController extends Controller
                     'payment_method_id' => 'لا توجد طريقة دفع متاحة للمشتريات المدفوعة أو المدفوعة جزئياً. أضف طريقة دفع أولاً.',
                 ]);
             }
+        }
+
+        if ($requestedPaymentStatus === 'paid') {
+            $validated['paid_amount'] = $totals['total'];
+        } elseif ($requestedPaymentStatus === 'partial') {
+            if ($enteredPaidAmount <= 0) {
+                throw ValidationException::withMessages([
+                    'paid_amount' => 'أدخل مبلغًا مدفوعًا أكبر من صفر عند اختيار الدفع الجزئي.',
+                ]);
+            }
+
+            if ($enteredPaidAmount >= (float) $totals['total']) {
+                throw ValidationException::withMessages([
+                    'paid_amount' => 'مبلغ الدفع الجزئي يجب أن يكون أقل من إجمالي طلب الشراء.',
+                ]);
+            }
+
+            $validated['paid_amount'] = $enteredPaidAmount;
         }
 
         return $validated;
@@ -4049,6 +4442,11 @@ class AccountingPageController extends Controller
         return $status !== 'draft';
     }
 
+    private function shouldReceivePurchaseStock(string $status): bool
+    {
+        return $status === 'approved';
+    }
+
     private function invoicePaymentStatus(float $paidAmount, float $total): string
     {
         if ($paidAmount >= $total && $total > 0) {
@@ -4074,6 +4472,19 @@ class AccountingPageController extends Controller
         ];
     }
 
+    private function resolvePurchasePaymentData(array $validated, array $totals, ?float $forcedPaidAmount = null): array
+    {
+        $paidAmount = $forcedPaidAmount !== null
+            ? round($forcedPaidAmount, 2)
+            : round((float) ($validated['paid_amount'] ?? 0), 2);
+
+        return [
+            'paid_amount' => $paidAmount,
+            'balance_due' => round(max((float) $totals['total'] - $paidAmount, 0), 2),
+            'payment_status' => $this->purchasePaymentStatus($paidAmount, (float) $totals['total']),
+        ];
+    }
+
     private function invoiceStockRequirementsFromValidated(array $validated): array
     {
         $requirements = [];
@@ -4088,6 +4499,63 @@ class AccountingPageController extends Controller
             $quantity = round((float) ($validated['item_quantity'][$index] ?? 0), 2);
 
             if ($quantity <= 0) {
+                continue;
+            }
+
+            if (! isset($requirements[$productId])) {
+                $requirements[$productId] = [
+                    'requested' => 0.0,
+                    'line_indexes' => [],
+                ];
+            }
+
+            $requirements[$productId]['requested'] += $quantity;
+            $requirements[$productId]['line_indexes'][] = $index;
+        }
+
+        return $requirements;
+    }
+
+    private function purchaseStockRequirementsFromValidated(array $validated): array
+    {
+        $requirements = [];
+
+        foreach ($validated['item_product_id'] as $index => $productId) {
+            $productId = (int) ($productId ?: 0);
+
+            if ($productId <= 0) {
+                continue;
+            }
+
+            $quantity = round((float) ($validated['item_quantity'][$index] ?? 0), 2);
+
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            if (! isset($requirements[$productId])) {
+                $requirements[$productId] = [
+                    'requested' => 0.0,
+                    'line_indexes' => [],
+                ];
+            }
+
+            $requirements[$productId]['requested'] += $quantity;
+            $requirements[$productId]['line_indexes'][] = $index;
+        }
+
+        return $requirements;
+    }
+
+    private function purchaseStockRequirementsFromItems(iterable $items): array
+    {
+        $requirements = [];
+
+        foreach ($items as $index => $item) {
+            $productId = (int) ($item->product_id ?? 0);
+            $quantity = round((float) ($item->quantity ?? 0), 2);
+
+            if ($productId <= 0 || $quantity <= 0) {
                 continue;
             }
 
@@ -4263,6 +4731,76 @@ class AccountingPageController extends Controller
 
             $product->update([
                 'stock_quantity' => round((float) $product->stock_quantity + round((float) $requirement['requested'], 2), 2),
+            ]);
+        }
+    }
+
+    private function applyPurchaseStock(int $companyId, array $requirements): void
+    {
+        if ($requirements === []) {
+            return;
+        }
+
+        $productIds = array_keys($requirements);
+        $products = Product::query()
+            ->where('company_id', $companyId)
+            ->whereIn('id', $productIds)
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
+
+        foreach ($requirements as $productId => $requirement) {
+            /** @var Product|null $product */
+            $product = $products->get($productId);
+
+            if (! $product || $product->type === 'service') {
+                continue;
+            }
+
+            $product->update([
+                'stock_quantity' => round((float) $product->stock_quantity + round((float) $requirement['requested'], 2), 2),
+            ]);
+        }
+    }
+
+    private function reversePurchaseStock(int $companyId, array $requirements): void
+    {
+        if ($requirements === []) {
+            return;
+        }
+
+        $productIds = array_keys($requirements);
+        $products = Product::query()
+            ->where('company_id', $companyId)
+            ->whereIn('id', $productIds)
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
+
+        foreach ($requirements as $productId => $requirement) {
+            /** @var Product|null $product */
+            $product = $products->get($productId);
+
+            if (! $product || $product->type === 'service') {
+                continue;
+            }
+
+            $availableQuantity = round((float) $product->stock_quantity, 2);
+            $requestedQuantity = round((float) $requirement['requested'], 2);
+
+            if ($requestedQuantity > $availableQuantity) {
+                throw ValidationException::withMessages([
+                    'status' => sprintf(
+                        'لا يمكن عكس المخزون لطلب الشراء لأن المنتج "%s" يتوفر منه حالياً %s فقط، بينما الكمية المطلوب عكسها %s.',
+                        $product->name,
+                        number_format($availableQuantity, 2),
+                        number_format($requestedQuantity, 2)
+                    ),
+                ]);
+            }
+
+            $product->update([
+                'stock_quantity' => round($availableQuantity - $requestedQuantity, 2),
             ]);
         }
     }

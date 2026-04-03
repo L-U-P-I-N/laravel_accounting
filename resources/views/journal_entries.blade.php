@@ -72,6 +72,13 @@
             <label class="form-label">إلى تاريخ</label>
             <input type="date" class="form-control" name="date_to" value="{{ $filters['date_to'] }}">
         </div>
+        <div class="col-lg-2 col-md-6">
+            <label class="form-label">ترتيب التاريخ</label>
+            <select class="form-select" name="sort_direction">
+                <option value="desc" {{ $filters['sort_direction'] === 'desc' ? 'selected' : '' }}>الأحدث أولاً</option>
+                <option value="asc" {{ $filters['sort_direction'] === 'asc' ? 'selected' : '' }}>الأقدم أولاً</option>
+            </select>
+        </div>
         <div class="col-lg-2 col-md-6 d-grid">
             <button type="submit" class="btn btn-primary">تطبيق</button>
         </div>

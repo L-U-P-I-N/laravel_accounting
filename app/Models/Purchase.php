@@ -67,6 +67,11 @@ class Purchase extends Model
         return $this->belongsTo(PaymentMethod::class);
     }
 
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
     public function scopeForCompany($query, $companyId)
     {
         return $query->where('company_id', $companyId);

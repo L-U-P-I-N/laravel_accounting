@@ -31,6 +31,12 @@
             'date_from' => $dateFrom !== '' ? $dateFrom : null,
             'date_to' => $dateTo !== '' ? $dateTo : null,
         ], fn ($value) => $value !== null && $value !== '');
+        $purchaseActivityReportParams = array_filter([
+            'group_by' => 'day',
+            'date_from' => $dateFrom !== '' ? $dateFrom : null,
+            'date_to' => $dateTo !== '' ? $dateTo : null,
+            'reference' => request('reference'),
+        ], fn ($value) => $value !== null && $value !== '');
     @endphp
 
     <div class="page-header">
@@ -43,6 +49,9 @@
                 <a href="{{ route('reports', $purchasesReportParams) }}" class="btn btn-outline-primary">
                     <i class="fas fa-chart-bar ms-1"></i> مركز التقارير
                 </a>
+                <a href="{{ route('reports.operations_activity', $purchaseActivityReportParams) }}" class="btn btn-outline-dark">
+                    <i class="fas fa-arrow-right-arrow-left ms-1"></i> تقرير الحركة
+                </a>
             @endif
             @if ($canManagePurchases)
                 <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addPurchaseModal">
@@ -54,6 +63,10 @@
 
     @if (session('status'))
         <div class="alert alert-success">{{ session('status') }}</div>
+    @endif
+
+    @if (session('error'))
+        <div class="alert alert-danger">{{ session('error') }}</div>
     @endif
 
     @php
@@ -97,6 +110,13 @@
                         <div class="col-md-3">
                             <label class="form-label">إلى تاريخ</label>
                             <input type="date" class="form-control" name="date_to" value="{{ $dateTo }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">ترتيب التاريخ</label>
+                            <select name="sort_direction" class="form-select">
+                                <option value="desc" {{ $sortDirection === 'desc' ? 'selected' : '' }}>الأحدث أولاً</option>
+                                <option value="asc" {{ $sortDirection === 'asc' ? 'selected' : '' }}>الأقدم أولاً</option>
+                            </select>
                         </div>
                         <div class="col-12">
                             <button type="submit" class="btn btn-primary">بحث</button>
@@ -213,6 +233,11 @@
                                             <i class="fas fa-eye"></i>
                                         </button>
                                         @if ($canManagePurchases)
+                                            @if ((float) $purchase->balance_due > 0 && ! in_array($purchase->status, ['draft', 'cancelled'], true))
+                                                <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#purchasePaymentModal{{ $purchase->id }}" title="تسجيل دفعة">
+                                                    <i class="fas fa-money-bill-wave"></i>
+                                                </button>
+                                            @endif
                                             <button type="button" class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editPurchaseModal{{ $purchase->id }}" title="تعديل الطلب">
                                                 <i class="fas fa-edit"></i>
                                             </button>
@@ -330,11 +355,121 @@
                                 <div class="text-muted mt-2">{{ $purchase->notes }}</div>
                             </div>
                         @endif
+
+                        <div class="list-card mb-0 mt-3">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                                <div>
+                                    <strong>سجل دفعات الشراء</strong>
+                                    <div class="text-muted small mt-1">كل دفعة جزئية تُحفظ كسجل مستقل مع المرجع وطريقة الدفع.</div>
+                                </div>
+                                @if ($canManagePurchases && (float) $purchase->balance_due > 0 && ! in_array($purchase->status, ['draft', 'cancelled'], true))
+                                    <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#purchasePaymentModal{{ $purchase->id }}">
+                                        <i class="fas fa-plus ms-1"></i> إضافة دفعة
+                                    </button>
+                                @endif
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>التاريخ</th>
+                                            <th>المرجع</th>
+                                            <th>الطريقة</th>
+                                            <th>المبلغ</th>
+                                            <th>ملاحظات</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @forelse ($purchase->payments as $payment)
+                                            <tr>
+                                                <td>{{ optional($payment->payment_date)->format('Y-m-d') ?: '-' }}</td>
+                                                <td>{{ $payment->reference ?: '-' }}</td>
+                                                <td>{{ $payment->paymentMethod?->name ?? 'غير محدد' }}</td>
+                                                <td>{{ number_format((float) $payment->amount, 2) }} {{ $company->currency }}</td>
+                                                <td>{{ $payment->notes ?: '-' }}</td>
+                                            </tr>
+                                        @empty
+                                            <tr>
+                                                <td colspan="5" class="text-center text-muted">لا توجد دفعات مسجلة على هذا الطلب حتى الآن.</td>
+                                            </tr>
+                                        @endforelse
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     @endforeach
+
+    @if ($canManagePurchases)
+        @foreach ($purchases as $purchase)
+            @php
+                $paymentPurchaseModalKey = 'payment-' . $purchase->id;
+                $paymentPurchaseModalHasErrors = $errors->any() && $activePurchaseModal === $paymentPurchaseModalKey;
+            @endphp
+            <div class="modal fade" id="purchasePaymentModal{{ $purchase->id }}" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+                    <div class="modal-content">
+                        <form method="POST" action="{{ route('purchases.payments.store', $purchase) }}">
+                            @csrf
+                            <input type="hidden" name="purchase_modal" value="{{ $paymentPurchaseModalKey }}">
+                            <div class="modal-header">
+                                <div>
+                                    <h5 class="modal-title">تسجيل دفعة على {{ $purchase->purchase_number }}</h5>
+                                    <div class="text-muted small mt-1">المتبقي الحالي: {{ number_format((float) $purchase->balance_due, 2) }} {{ $company->currency }}</div>
+                                </div>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                @if ($paymentPurchaseModalHasErrors)
+                                    <div class="alert alert-danger">
+                                        <ul class="mb-0 ps-3">
+                                            @foreach ($errors->all() as $error)
+                                                <li>{{ $error }}</li>
+                                            @endforeach
+                                        </ul>
+                                    </div>
+                                @endif
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label">قيمة الدفعة</label>
+                                        <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $purchase->balance_due, 2, '.', '') }}" step="0.01" value="{{ $paymentPurchaseModalHasErrors ? old('payment_amount') : number_format((float) $purchase->balance_due, 2, '.', '') }}" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">تاريخ الدفعة</label>
+                                        <input type="date" name="payment_date" class="form-control" value="{{ $paymentPurchaseModalHasErrors ? old('payment_date', now()->format('Y-m-d')) : now()->format('Y-m-d') }}" required>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">طريقة الدفع</label>
+                                        <select name="payment_method_id" class="form-select">
+                                            <option value="">لم يتم التحديد</option>
+                                            @foreach ($paymentMethods as $paymentMethod)
+                                                <option value="{{ $paymentMethod->id }}" {{ (string) ($paymentPurchaseModalHasErrors ? old('payment_method_id', $purchase->payment_method_id ?: $defaultPaymentMethodId) : ($purchase->payment_method_id ?: $defaultPaymentMethodId)) === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">المرجع</label>
+                                        <input type="text" name="payment_reference" class="form-control" value="{{ $paymentPurchaseModalHasErrors ? old('payment_reference') : '' }}" placeholder="يُولّد تلقائياً عند تركه فارغاً">
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label">ملاحظات</label>
+                                        <textarea name="payment_notes" class="form-control" rows="3" placeholder="مثال: دفعة مقدمة، تحويل بنكي، أو تسوية جزئية">{{ $paymentPurchaseModalHasErrors ? old('payment_notes') : '' }}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                                <button type="submit" class="btn btn-primary">تسجيل الدفعة</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        @endforeach
+    @endif
 
     @if ($canManagePurchases)
         @foreach ($purchases as $purchase)
@@ -405,6 +540,10 @@
                                                 <option value="{{ $value }}" {{ ($editPurchaseModalHasErrors ? old('payment_status', $purchase->payment_status) : $purchase->payment_status) === $value ? 'selected' : '' }}>{{ $label }}</option>
                                             @endforeach
                                         </select>
+                                    </div>
+                                    <div class="col-md-4" data-paid-amount-container>
+                                        <label class="form-label">المبلغ المدفوع</label>
+                                        <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ $editPurchaseModalHasErrors ? old('paid_amount', number_format((float) $purchase->paid_amount, 2, '.', '')) : number_format((float) $purchase->paid_amount, 2, '.', '') }}" data-purchase-paid-amount>
                                     </div>
                                     <div class="col-md-4" data-payment-method-container>
                                         <div data-payment-method-input>
@@ -486,6 +625,7 @@
                                     <div class="col-md-3"><div class="list-card"><strong>المجموع الفرعي:</strong> <span data-purchase-subtotal>0.00 {{ $company->currency }}</span></div></div>
                                     <div class="col-md-3"><div class="list-card"><strong>الضريبة:</strong> <span data-purchase-tax>0.00 {{ $company->currency }}</span></div></div>
                                     <div class="col-md-3"><div class="list-card"><strong>الإجمالي:</strong> <span data-purchase-total>0.00 {{ $company->currency }}</span></div></div>
+                                    <div class="col-md-3"><div class="list-card"><strong>المدفوع:</strong> <span data-purchase-paid-summary>{{ number_format((float) $purchase->paid_amount, 2) }} {{ $company->currency }}</span></div></div>
                                     <div class="col-md-3"><div class="list-card"><strong>المتبقي:</strong> <span data-purchase-remaining>{{ number_format((float) $purchase->balance_due, 2) }} {{ $company->currency }}</span></div></div>
                                 </div>
                             </div>
@@ -555,6 +695,10 @@
                                         <option value="{{ $value }}" {{ old('payment_status', 'pending') === $value ? 'selected' : '' }}>{{ $label }}</option>
                                     @endforeach
                                 </select>
+                            </div>
+                            <div class="col-md-4" data-paid-amount-container>
+                                <label class="form-label">المبلغ المدفوع</label>
+                                <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ old('paid_amount', '0') }}" data-purchase-paid-amount>
                             </div>
                             <div class="col-md-4" data-payment-method-container>
                                 <div data-payment-method-input>
@@ -640,6 +784,7 @@
                             <div class="col-md-3"><div class="list-card"><strong>المجموع الفرعي:</strong> <span data-purchase-subtotal>0.00 {{ $company->currency }}</span></div></div>
                             <div class="col-md-3"><div class="list-card"><strong>الضريبة:</strong> <span data-purchase-tax>0.00 {{ $company->currency }}</span></div></div>
                             <div class="col-md-3"><div class="list-card"><strong>الإجمالي:</strong> <span data-purchase-total>0.00 {{ $company->currency }}</span></div></div>
+                            <div class="col-md-3"><div class="list-card"><strong>المدفوع:</strong> <span data-purchase-paid-summary>0.00 {{ $company->currency }}</span></div></div>
                             <div class="col-md-3"><div class="list-card"><strong>المتبقي:</strong> <span data-purchase-remaining>0.00 {{ $company->currency }}</span></div></div>
                         </div>
                     </div>
@@ -693,7 +838,9 @@ function calculatePurchaseFormTotals(form) {
     const taxTarget = form.querySelector('[data-purchase-tax]');
     const totalTarget = form.querySelector('[data-purchase-total]');
     const grandTotal = subtotal + taxAmount;
-    const paidAmountPreview = purchaseNumericValue(form.dataset.paidAmount || '0');
+    const paidAmountInput = form.querySelector('[data-purchase-paid-amount]');
+    const paidAmountPreview = purchaseNumericValue(paidAmountInput?.value || form.dataset.paidAmount || '0');
+    const paidSummaryTarget = form.querySelector('[data-purchase-paid-summary]');
     const remainingTarget = form.querySelector('[data-purchase-remaining]');
 
     if (subtotalTarget) {
@@ -708,8 +855,12 @@ function calculatePurchaseFormTotals(form) {
         totalTarget.textContent = `${grandTotal.toFixed(2)} {{ $company->currency }}`;
     }
 
+    if (paidSummaryTarget) {
+        paidSummaryTarget.textContent = `${Math.min(paidAmountPreview, grandTotal).toFixed(2)} {{ $company->currency }}`;
+    }
+
     if (remainingTarget) {
-        const remainingValue = Math.max(grandTotal - paidAmountPreview, 0);
+        const remainingValue = Math.max(grandTotal - Math.min(paidAmountPreview, grandTotal), 0);
         remainingTarget.textContent = `${remainingValue.toFixed(2)} {{ $company->currency }}`;
     }
 }
@@ -841,6 +992,8 @@ function addPurchaseRow(form) {
 function initializePurchasePaymentBehavior(form) {
     const statusSelect = form.querySelector('[data-payment-status-select]');
     const methodWrapper = form.querySelector('[data-payment-method-input]');
+    const paidAmountWrapper = form.querySelector('[data-paid-amount-container]');
+    const paidAmountInput = form.querySelector('[data-purchase-paid-amount]');
     const payablesNote = form.querySelector('[data-payables-note]');
     const methodSelect = methodWrapper?.querySelector('select[name="payment_method_id"]');
 
@@ -850,8 +1003,12 @@ function initializePurchasePaymentBehavior(form) {
 
     const togglePaymentPresentation = () => {
         const isDeferred = statusSelect.value === 'pending';
+        const isPaid = statusSelect.value === 'paid';
         methodWrapper.classList.toggle('d-none', isDeferred);
+        paidAmountWrapper?.classList.toggle('d-none', isDeferred);
         payablesNote?.classList.toggle('d-none', !isDeferred);
+
+        const currentTotal = purchaseNumericValue(form.querySelector('[data-purchase-total]')?.textContent);
 
         if (methodSelect) {
             methodSelect.disabled = isDeferred;
@@ -859,8 +1016,21 @@ function initializePurchasePaymentBehavior(form) {
                 methodSelect.value = '';
             }
         }
+
+        if (paidAmountInput) {
+            paidAmountInput.disabled = isDeferred || isPaid;
+
+            if (isDeferred) {
+                paidAmountInput.value = '0';
+            } else if (isPaid) {
+                paidAmountInput.value = currentTotal.toFixed(2);
+            }
+        }
+
+        calculatePurchaseFormTotals(form);
     };
 
+    paidAmountInput?.addEventListener('input', () => calculatePurchaseFormTotals(form));
     statusSelect.addEventListener('change', togglePaymentPresentation);
     togglePaymentPresentation();
 }
@@ -874,7 +1044,15 @@ document.querySelectorAll('[data-purchase-form]').forEach((form) => {
 
 @if ($errors->any())
 document.addEventListener('DOMContentLoaded', () => {
-    const modalId = @json($activePurchaseModal === 'create' ? 'addPurchaseModal' : (str_starts_with((string) $activePurchaseModal, 'edit-') ? 'editPurchaseModal' . substr((string) $activePurchaseModal, 5) : 'addPurchaseModal'));
+    const modalId = @json(
+        $activePurchaseModal === 'create'
+            ? 'addPurchaseModal'
+            : (str_starts_with((string) $activePurchaseModal, 'edit-')
+                ? 'editPurchaseModal' . substr((string) $activePurchaseModal, 5)
+                : (str_starts_with((string) $activePurchaseModal, 'payment-')
+                    ? 'purchasePaymentModal' . substr((string) $activePurchaseModal, 8)
+                    : 'addPurchaseModal'))
+    );
     const modalElement = document.getElementById(modalId);
 
     if (modalElement && window.bootstrap) {

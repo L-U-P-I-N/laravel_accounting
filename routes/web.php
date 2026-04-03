@@ -50,6 +50,7 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
         Route::get('/purchases', [AccountingPageController::class, 'purchases'])->name('purchases');
         Route::get('/purchases/{purchase}/attachment', [AccountingPageController::class, 'showPurchaseAttachment'])->name('purchases.attachment');
         Route::post('/purchases', [AccountingPageController::class, 'storePurchase'])->name('purchases.store');
+        Route::post('/purchases/{purchase}/payments', [AccountingPageController::class, 'storePurchasePayment'])->name('purchases.payments.store');
         Route::put('/purchases/{purchase}', [AccountingPageController::class, 'updatePurchase'])->name('purchases.update');
         Route::patch('/purchases/{purchase}/approve', [AccountingPageController::class, 'approvePurchase'])->name('purchases.approve');
         Route::delete('/purchases/{purchase}', [AccountingPageController::class, 'destroyPurchase'])->name('purchases.destroy');
@@ -81,6 +82,7 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:manage_accounts')->group(function () {
         Route::get('/chart-of-accounts', [AccountingPageController::class, 'chartOfAccounts'])->name('chart_of_accounts');
+        Route::get('/chart-of-accounts/{account}', [AccountingPageController::class, 'showAccount'])->name('chart_of_accounts.show');
         Route::post('/chart-of-accounts', [AccountingPageController::class, 'storeAccount'])->name('chart_of_accounts.store');
         Route::post('/chart-of-accounts/resync', [AccountingPageController::class, 'resyncCompanyAccounting'])->name('chart_of_accounts.resync');
         Route::get('/expenses', [AccountingPageController::class, 'expenses'])->name('expenses');
@@ -97,6 +99,7 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:view_reports')->group(function () {
         Route::get('/reports', [AccountingPageController::class, 'reports'])->name('reports');
+        Route::get('/reports/operations-activity', [AccountingPageController::class, 'operationsActivityReport'])->name('reports.operations_activity');
         Route::get('/reports/view/{report}', [AccountingPageController::class, 'reportShow'])->name('reports.show');
         Route::get('/reports/query', [AccountingPageController::class, 'reportQuery'])->name('reports.query');
     });

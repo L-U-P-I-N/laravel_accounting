@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\AccountingPageController;
+use App\Models\Account;
 use App\Models\Expense;
 use App\Models\Company;
 use App\Models\Customer;
@@ -71,6 +72,55 @@ class AccountingArchitectureTest extends TestCase
         $this->assertNotNull($product->revenue_account_id);
         $this->assertNotNull($product->inventory_account_id);
         $this->assertNotNull($product->cogs_account_id);
+
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '1', 'account_type' => 'asset']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '2', 'account_type' => 'liability']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '3', 'account_type' => 'revenue']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '4', 'account_type' => 'expense']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5', 'account_type' => 'equity']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5.1', 'account_type' => 'equity']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5.2', 'account_type' => 'equity']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5.3', 'account_type' => 'equity']);
+    }
+
+    public function test_company_synchronization_creates_complete_base_chart_structure(): void
+    {
+        $company = Company::create([
+            'name' => 'Base Chart Co',
+            'country_code' => 'SA',
+            'city' => 'الرياض',
+            'currency' => 'SAR',
+        ]);
+
+        app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+
+        $codes = Account::query()
+            ->where('company_id', $company->id)
+            ->pluck('code')
+            ->all();
+
+        $this->assertContains('1.6', $codes);
+        $this->assertContains('1.7', $codes);
+        $this->assertContains('1.10', $codes);
+        $this->assertContains('1.20', $codes);
+        $this->assertContains('2.10', $codes);
+        $this->assertContains('2.20', $codes);
+        $this->assertContains('2.4', $codes);
+        $this->assertContains('3.2', $codes);
+        $this->assertContains('3.3', $codes);
+        $this->assertContains('3.10', $codes);
+        $this->assertContains('3.20', $codes);
+        $this->assertContains('4.5', $codes);
+        $this->assertContains('4.6', $codes);
+        $this->assertContains('4.10', $codes);
+        $this->assertContains('4.20', $codes);
+        $this->assertContains('4.30', $codes);
+        $this->assertContains('4.31', $codes);
+        $this->assertContains('4.40', $codes);
+        $this->assertContains('5', $codes);
+        $this->assertContains('5.1', $codes);
+        $this->assertContains('5.2', $codes);
+        $this->assertContains('5.3', $codes);
     }
 
     public function test_invoice_entry_splits_between_cash_customer_revenue_and_cogs(): void

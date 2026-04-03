@@ -79,7 +79,7 @@
                 </a>
             @endif
             @if ($currentUser?->hasPermission('manage_accounts'))
-                <a href="{{ route('chart_of_accounts') }}" class="nav-link {{ request()->routeIs('chart_of_accounts') ? 'active' : '' }}">
+                <a href="{{ route('chart_of_accounts') }}" class="nav-link {{ request()->routeIs('chart_of_accounts*') ? 'active' : '' }}">
                     <i class="fas fa-sitemap"></i>
                     <span>شجرة الحسابات</span>
                 </a>

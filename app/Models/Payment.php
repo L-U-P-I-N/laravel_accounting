@@ -13,9 +13,14 @@ class Payment extends Model
     protected $fillable = [
         'company_id',
         'invoice_id',
+        'purchase_id',
         'customer_id',
+        'supplier_id',
         'payment_method_id',
+        'journal_entry_id',
         'amount',
+        'payment_direction',
+        'payment_category',
         'payment_date',
         'reference',
         'notes',
@@ -41,8 +46,23 @@ class Payment extends Model
         return $this->belongsTo(Customer::class);
     }
 
+    public function supplier(): BelongsTo
+    {
+        return $this->belongsTo(Supplier::class);
+    }
+
+    public function purchase(): BelongsTo
+    {
+        return $this->belongsTo(Purchase::class);
+    }
+
     public function paymentMethod(): BelongsTo
     {
         return $this->belongsTo(PaymentMethod::class);
+    }
+
+    public function journalEntry(): BelongsTo
+    {
+        return $this->belongsTo(JournalEntry::class);
     }
 }
