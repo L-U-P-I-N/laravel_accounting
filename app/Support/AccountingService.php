@@ -6,7 +6,6 @@ use App\Models\Account;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\JournalEntry;
-use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\Supplier;
@@ -26,7 +25,7 @@ class AccountingService
 
     public function syncInvoiceEntry(Invoice $invoice, User $user): JournalEntry
     {
-        $invoice->loadMissing(['items.product', 'customer.account', 'paymentMethod']);
+        $invoice->loadMissing(['items.product', 'customer.account']);
 
         $lines = collect();
         $paidAmount = $this->normalizeAmount(min((float) $invoice->paid_amount, (float) $invoice->total));
@@ -35,7 +34,7 @@ class AccountingService
         if ($paidAmount > 0) {
             $this->pushLine(
                 $lines,
-                $this->paymentAccountFromMethod((int) $invoice->company_id, $invoice->paymentMethod),
+                $this->defaultSettlementAccount((int) $invoice->company_id),
                 'إثبات المقبوض من الفاتورة ' . $invoice->invoice_number,
                 $paidAmount,
                 0,
@@ -128,7 +127,7 @@ class AccountingService
 
     public function syncPurchaseEntry(Purchase $purchase, User $user): JournalEntry
     {
-        $purchase->loadMissing(['items.product', 'supplier.account', 'paymentMethod']);
+        $purchase->loadMissing(['items.product', 'supplier.account']);
 
         $lines = collect();
 
@@ -184,7 +183,7 @@ class AccountingService
         if ($paidAmount > 0) {
             $this->pushLine(
                 $lines,
-                $this->paymentAccountFromMethod((int) $purchase->company_id, $purchase->paymentMethod),
+                $this->defaultSettlementAccount((int) $purchase->company_id),
                 'السداد المباشر لطلب الشراء ' . $purchase->purchase_number,
                 0,
                 $paidAmount,
@@ -359,7 +358,7 @@ class AccountingService
             'expenses' => 0,
         ];
 
-        Invoice::with(['items.product', 'customer.account', 'paymentMethod'])
+        Invoice::with(['items.product', 'customer.account'])
             ->where('company_id', $company->id)
             ->orderBy('id')
             ->get()
@@ -368,7 +367,7 @@ class AccountingService
                 $summary['invoices']++;
             });
 
-        Purchase::with(['items.product', 'supplier.account', 'paymentMethod'])
+        Purchase::with(['items.product', 'supplier.account'])
             ->where('company_id', $company->id)
             ->orderBy('id')
             ->get()
@@ -517,22 +516,22 @@ class AccountingService
 
     private function receivablesAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '1.3', 'العملاء', 'asset', '1', ['العملاء', 'ذمم مدينة', 'حسابات المدينين', 'Customers', 'Receivable', 'Debtor']);
+        return $this->resolveConceptAccount($companyId, '1103', 'المدينون', 'asset', '11', ['المدينون', 'العملاء', 'ذمم مدينة', 'حسابات المدينين', 'Customers', 'Receivable', 'Debtor']);
     }
 
     private function cashAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '1.1', 'الصندوق', 'asset', '1', ['الصندوق', 'Cash']);
+        return $this->resolveConceptAccount($companyId, '110101', 'النقدية في الخزينة', 'asset', '1101', ['النقدية في الخزينة', 'الصندوق', 'Cash']);
     }
 
     private function inventoryAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '1.4', 'المخزون', 'asset', '1', ['المخزون', 'Inventory']);
+        return $this->resolveConceptAccount($companyId, '1106', 'المخزون', 'asset', '11', ['المخزون', 'Inventory']);
     }
 
     private function payablesAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '2.1', 'الموردين', 'liability', '2', ['الموردين', 'ذمم دائنة', 'حسابات الدائنين', 'Suppliers', 'Accounts Payable', 'Payable']);
+        return $this->resolveConceptAccount($companyId, '2101', 'الدائنون', 'liability', '21', ['الدائنون', 'الموردين', 'ذمم دائنة', 'حسابات الدائنين', 'Suppliers', 'Accounts Payable', 'Payable']);
     }
 
     private function inputVatAccount(int $companyId): Account
@@ -543,7 +542,7 @@ class AccountingService
             return $configuredAccount;
         }
 
-        return $this->resolveConceptAccount($companyId, '1.5', 'ضريبة المدخلات', 'asset', '1', ['ضريبة المدخلات', 'Input VAT']);
+        return $this->resolveConceptAccount($companyId, '2105', 'ضريبة القيمة المضافة المستحقة', 'liability', '21', ['ضريبة القيمة المضافة المستحقة', 'ضريبة المدخلات', 'Input VAT', 'VAT Payable']);
     }
 
     private function outputVatAccount(int $companyId): Account
@@ -554,7 +553,7 @@ class AccountingService
             return $configuredAccount;
         }
 
-        return $this->resolveConceptAccount($companyId, '2.3', 'ضريبة المخرجات', 'liability', '2', ['ضريبة المخرجات', 'ضريبة القيمة المضافة المستحقة', 'Output VAT', 'VAT Payable']);
+        return $this->resolveConceptAccount($companyId, '2105', 'ضريبة القيمة المضافة المستحقة', 'liability', '21', ['ضريبة المخرجات', 'ضريبة القيمة المضافة المستحقة', 'Output VAT', 'VAT Payable']);
     }
 
     private function configuredTaxAccount(int $companyId, array $taxTypes): ?Account
@@ -575,27 +574,27 @@ class AccountingService
 
     private function salesRevenueAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '3.1', 'مبيعات', 'revenue', '3', ['مبيعات', 'إيرادات المبيعات', 'Sales Revenue', 'Sales']);
+        return $this->resolveConceptAccount($companyId, '4101', 'إيرادات المبيعات/ الخدمات', 'revenue', '41', ['إيرادات المبيعات', 'إيرادات المبيعات/ الخدمات', 'مبيعات', 'Sales Revenue', 'Sales']);
     }
 
     private function serviceRevenueAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '3.1', 'مبيعات', 'revenue', '3', ['إيرادات الخدمات', 'مبيعات الخدمات', 'مبيعات', 'Service Revenue', 'Sales']);
+        return $this->resolveConceptAccount($companyId, '4101', 'إيرادات المبيعات/ الخدمات', 'revenue', '41', ['إيرادات الخدمات', 'إيرادات المبيعات/ الخدمات', 'مبيعات الخدمات', 'مبيعات', 'Service Revenue', 'Sales']);
     }
 
     private function miscExpenseAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '4.3', 'مصروفات متنوعة', 'expense', '4', ['مصروفات متنوعة', 'مصاريف إدارية وعامة', 'Miscellaneous', 'General Expense']);
+        return $this->resolveConceptAccount($companyId, '5214', 'مصاريف أخرى', 'expense', '52', ['مصاريف أخرى', 'مصروفات متنوعة', 'مصاريف إدارية وعامة', 'Miscellaneous', 'General Expense']);
     }
 
     private function cogsAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '4.4', 'تكلفة البضاعة المباعة', 'cogs', '4', ['تكلفة البضاعة المباعة', 'Cost of Goods Sold', 'COGS']);
+        return $this->resolveConceptAccount($companyId, '5101', 'تكلفة البضاعة المباعة', 'cogs', '51', ['تكلفة البضاعة المباعة', 'Cost of Goods Sold', 'COGS']);
     }
 
     private function bankAccount(int $companyId): Account
     {
-        return $this->resolveConceptAccount($companyId, '1.2', 'البنك', 'asset', '1', ['البنك', 'الحساب البنكي', 'الحسابات الجارية البنكية', 'Bank Account', 'Bank']);
+        return $this->resolveConceptAccount($companyId, '110201', 'حساب البنك الجاري - اسم البنك', 'asset', '1102', ['حساب البنك الجاري', 'النقدية في البنك', 'الحساب البنكي', 'الحسابات الجارية البنكية', 'Bank Account', 'Bank']);
     }
 
     private function customerReceivableAccount(Invoice $invoice): Account
@@ -678,20 +677,6 @@ class AccountingService
 
     private function defaultSettlementAccount(int $companyId): Account
     {
-        $paymentMethod = PaymentMethod::where('company_id', $companyId)
-            ->orderByDesc('is_default')
-            ->orderBy('id')
-            ->first();
-
-        return $this->paymentAccountFromMethod($companyId, $paymentMethod);
-    }
-
-    private function paymentAccountFromMethod(int $companyId, ?PaymentMethod $paymentMethod): Account
-    {
-        if ($paymentMethod?->type === 'cash') {
-            return $this->cashAccount($companyId);
-        }
-
         return $this->bankAccount($companyId);
     }
 

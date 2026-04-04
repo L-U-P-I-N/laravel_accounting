@@ -40,10 +40,6 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
         Route::put('/sales-channels/{salesChannel}', [AccountingPageController::class, 'updateSalesChannel'])->name('sales_channels.update');
         Route::delete('/sales-channels/{salesChannel}', [AccountingPageController::class, 'destroySalesChannel'])->name('sales_channels.destroy');
 
-        Route::get('/payment-methods', [AccountingPageController::class, 'paymentMethods'])->name('payment_methods.index');
-        Route::post('/payment-methods', [AccountingPageController::class, 'storePaymentMethod'])->name('payment_methods.store');
-        Route::put('/payment-methods/{paymentMethod}', [AccountingPageController::class, 'updatePaymentMethod'])->name('payment_methods.update');
-        Route::delete('/payment-methods/{paymentMethod}', [AccountingPageController::class, 'destroyPaymentMethod'])->name('payment_methods.destroy');
     });
 
     Route::middleware('permission:manage_purchases')->group(function () {

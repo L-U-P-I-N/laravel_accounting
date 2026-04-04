@@ -89,11 +89,11 @@ class AuthController extends Controller
 
         // Create default tax settings
         if ($taxConfig['vat_rate'] > 0) {
-            $vatOutputAccount = Account::where('code', '2.3')
+            $vatOutputAccount = Account::where('code', '2105')
                 ->where('company_id', $company->id)
                 ->first();
 
-            $vatInputAccount = Account::where('code', '1.5')
+            $vatInputAccount = Account::where('code', '2105')
                 ->where('company_id', $company->id)
                 ->first();
 

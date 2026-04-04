@@ -71,10 +71,11 @@ class DocumentNumberGeneratorTest extends TestCase
 
         $paymentAccount = Account::create([
             'company_id' => $company->id,
-            'code' => '1102',
+            'code' => '110201',
             'name' => 'Bank Account',
             'name_ar' => 'Bank Account',
             'account_type' => 'asset',
+            'allows_direct_transactions' => true,
             'is_active' => true,
             'is_system' => false,
             'balance' => 0,

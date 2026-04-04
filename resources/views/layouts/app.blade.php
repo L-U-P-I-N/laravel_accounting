@@ -49,10 +49,6 @@
                     <i class="fas fa-share-nodes"></i>
                     <span>قنوات البيع</span>
                 </a>
-                <a href="{{ route('payment_methods.index') }}" class="nav-link {{ request()->routeIs('payment_methods.*') ? 'active' : '' }}">
-                    <i class="fas fa-money-check-dollar"></i>
-                    <span>طرق الدفع</span>
-                </a>
             @endif
             @if ($currentUser?->hasPermission('manage_purchases'))
                 <a href="{{ route('purchases') }}" class="nav-link {{ request()->routeIs('purchases') ? 'active' : '' }}">

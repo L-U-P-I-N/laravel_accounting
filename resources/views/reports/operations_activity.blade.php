@@ -182,7 +182,6 @@
                                 <th>التصنيف</th>
                                 <th>المرجع</th>
                                 <th>الطرف</th>
-                                <th>الطريقة</th>
                                 <th>المبلغ</th>
                             </tr>
                         </thead>
@@ -193,12 +192,11 @@
                                     <td>{{ $payment->payment_category }}</td>
                                     <td>{{ $payment->reference ?: '-' }}</td>
                                     <td>{{ $payment->supplier?->name ?? $payment->invoice?->customer?->name ?? '-' }}</td>
-                                    <td>{{ $payment->paymentMethod?->name ?? 'غير محدد' }}</td>
                                     <td>{{ number_format((float) $payment->amount, 2) }} {{ $company->currency }}</td>
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="6" class="text-center text-muted">لا توجد دفعات لعرضها.</td>
+                                    <td colspan="5" class="text-center text-muted">لا توجد دفعات لعرضها.</td>
                                 </tr>
                             @endforelse
                         </tbody>

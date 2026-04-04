@@ -74,6 +74,7 @@
                     <div class="col-md-6"><strong>التصنيف</strong><div class="text-muted mt-1">{{ $accountTypeLabel }}</div></div>
                     <div class="col-md-6"><strong>الوضع داخل الشجرة</strong><div class="text-muted mt-1">{{ $hierarchyLabel }}</div></div>
                     <div class="col-md-6"><strong>حساب نظام</strong><div class="text-muted mt-1">{{ $account->is_system ? 'نعم' : 'لا' }}</div></div>
+                    <div class="col-md-6"><strong>قابل للدفع/التحصيل</strong><div class="text-muted mt-1">{{ $account->allows_direct_transactions ? 'نعم' : 'لا' }}</div></div>
                     <div class="col-12">
                         <strong>الحساب الأب</strong>
                         <div class="text-muted mt-1">

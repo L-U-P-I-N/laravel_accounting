@@ -8,7 +8,6 @@
     $dueDateValue = old('due_date', $isEditingInvoice ? optional($invoice->due_date)->format('Y-m-d') : now()->addDays(30)->format('Y-m-d'));
     $customerIdValue = old('customer_id', $isEditingInvoice ? $invoice->customer_id : null);
     $salesChannelIdValue = old('sales_channel_id', $isEditingInvoice ? $invoice->sales_channel_id : ($defaultSalesChannelId ?? null));
-    $paymentMethodIdValue = old('payment_method_id', $isEditingInvoice ? $invoice->payment_method_id : ($defaultPaymentMethodId ?? null));
     $paymentStatusValue = old('payment_status', $isEditingInvoice ? match ($invoice->payment_status) { 'paid' => 'full', 'pending' => 'deferred', default => $invoice->payment_status } : 'deferred');
     $paidAmountValue = old('paid_amount', $isEditingInvoice ? number_format((float) $invoice->paid_amount, 2, '.', '') : '0');
     $invoiceStatusValue = old('status', $isEditingInvoice ? $invoice->status : 'sent');
@@ -168,15 +167,6 @@
                     <option value="">اختر قناة البيع</option>
                     @foreach ($salesChannels as $salesChannel)
                         <option value="{{ $salesChannel->id }}" {{ (string) $salesChannelIdValue === (string) $salesChannel->id ? 'selected' : '' }}>{{ $salesChannel->name }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-md-3" data-payment-method-wrapper>
-                <label class="form-label">طريقة الدفع *</label>
-                <select name="payment_method_id" class="form-select" required>
-                    <option value="">اختر طريقة الدفع</option>
-                    @foreach ($paymentMethods as $paymentMethod)
-                        <option value="{{ $paymentMethod->id }}" {{ (string) $paymentMethodIdValue === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
                     @endforeach
                 </select>
             </div>
@@ -375,8 +365,6 @@ function syncInvoicePaymentFields(form, totalAmount) {
     const balanceField = form.querySelector('[data-balance-due]');
     const paidSummary = form.querySelector('#paidAmountSummary');
     const balanceSummary = form.querySelector('#balanceDueSummary');
-    const paymentMethodWrapper = form.querySelector('[data-payment-method-wrapper]');
-    const paymentMethodSelect = paymentMethodWrapper?.querySelector('select[name="payment_method_id"]');
     const paidAmountWrapper = form.querySelector('[data-paid-amount-wrapper]');
 
     if (!paymentStatusField || !paidAmountField) {
@@ -387,26 +375,13 @@ function syncInvoicePaymentFields(form, totalAmount) {
         paidAmountField.value = totalAmount.toFixed(2);
         paidAmountField.readOnly = true;
         paidAmountWrapper?.classList.add('d-none');
-        paymentMethodWrapper?.classList.remove('d-none');
-        if (paymentMethodSelect) {
-            paymentMethodSelect.required = true;
-        }
     } else if (paymentStatusField.value === 'deferred') {
         paidAmountField.value = '0.00';
         paidAmountField.readOnly = true;
         paidAmountWrapper?.classList.add('d-none');
-        paymentMethodWrapper?.classList.add('d-none');
-        if (paymentMethodSelect) {
-            paymentMethodSelect.required = false;
-            paymentMethodSelect.value = '';
-        }
     } else {
         paidAmountField.readOnly = false;
         paidAmountWrapper?.classList.remove('d-none');
-        paymentMethodWrapper?.classList.remove('d-none');
-        if (paymentMethodSelect) {
-            paymentMethodSelect.required = true;
-        }
         const partialValue = Math.min(invoiceNumericValue(paidAmountField.value), totalAmount);
         paidAmountField.value = partialValue.toFixed(2);
     }

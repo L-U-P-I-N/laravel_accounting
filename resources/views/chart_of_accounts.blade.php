@@ -5,7 +5,7 @@
 @php
     $canManageAccounts = auth()->user()->hasPermission('manage_accounts');
     $canViewReports = auth()->user()->hasPermission('view_reports');
-    $accountModalErrorFields = ['code', 'name', 'name_ar', 'account_type', 'parent_id', 'description'];
+    $accountModalErrorFields = ['code', 'name', 'name_ar', 'account_type', 'parent_id', 'description', 'allows_direct_transactions'];
     $accountTypeOptions = [
         'asset' => 'أصل',
         'liability' => 'خصم',
@@ -528,6 +528,12 @@
                                 <label class="form-label">الوصف</label>
                                 <textarea name="description" class="form-control @error('description') is-invalid @enderror" rows="3">{{ old('description') }}</textarea>
                                 @error('description')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                            </div>
+                            <div class="col-md-12">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="allows_direct_transactions" value="1" id="accountAllowsDirectTransactions" @checked(old('allows_direct_transactions'))>
+                                    <label class="form-check-label" for="accountAllowsDirectTransactions">يمكن الدفع والتحصيل بهذا الحساب</label>
+                                </div>
                             </div>
                             <div class="col-md-12">
                                 <div class="form-check">

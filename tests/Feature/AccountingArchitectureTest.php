@@ -75,12 +75,13 @@ class AccountingArchitectureTest extends TestCase
 
         $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '1', 'account_type' => 'asset']);
         $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '2', 'account_type' => 'liability']);
-        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '3', 'account_type' => 'revenue']);
-        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '4', 'account_type' => 'expense']);
-        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5', 'account_type' => 'equity']);
-        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5.1', 'account_type' => 'equity']);
-        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5.2', 'account_type' => 'equity']);
-        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5.3', 'account_type' => 'equity']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '3', 'account_type' => 'equity']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '4', 'account_type' => 'revenue']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '5', 'account_type' => 'expense']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '31', 'account_type' => 'equity']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '34', 'account_type' => 'equity']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '41', 'account_type' => 'revenue']);
+        $this->assertDatabaseHas('accounts', ['company_id' => $company->id, 'code' => '52', 'account_type' => 'expense']);
     }
 
     public function test_company_synchronization_creates_complete_base_chart_structure(): void
@@ -99,28 +100,28 @@ class AccountingArchitectureTest extends TestCase
             ->pluck('code')
             ->all();
 
-        $this->assertContains('1.6', $codes);
-        $this->assertContains('1.7', $codes);
-        $this->assertContains('1.10', $codes);
-        $this->assertContains('1.20', $codes);
-        $this->assertContains('2.10', $codes);
-        $this->assertContains('2.20', $codes);
-        $this->assertContains('2.4', $codes);
-        $this->assertContains('3.2', $codes);
-        $this->assertContains('3.3', $codes);
-        $this->assertContains('3.10', $codes);
-        $this->assertContains('3.20', $codes);
-        $this->assertContains('4.5', $codes);
-        $this->assertContains('4.6', $codes);
-        $this->assertContains('4.10', $codes);
-        $this->assertContains('4.20', $codes);
-        $this->assertContains('4.30', $codes);
-        $this->assertContains('4.31', $codes);
-        $this->assertContains('4.40', $codes);
+        $this->assertContains('11', $codes);
+        $this->assertContains('1101', $codes);
+        $this->assertContains('110101', $codes);
+        $this->assertContains('1102', $codes);
+        $this->assertContains('110201', $codes);
+        $this->assertContains('1103', $codes);
+        $this->assertContains('1106', $codes);
+        $this->assertContains('12', $codes);
+        $this->assertContains('1201', $codes);
+        $this->assertContains('21', $codes);
+        $this->assertContains('22', $codes);
+        $this->assertContains('2105', $codes);
+        $this->assertContains('31', $codes);
+        $this->assertContains('34', $codes);
+        $this->assertContains('41', $codes);
+        $this->assertContains('42', $codes);
+        $this->assertContains('51', $codes);
+        $this->assertContains('52', $codes);
+        $this->assertContains('53', $codes);
         $this->assertContains('5', $codes);
-        $this->assertContains('5.1', $codes);
-        $this->assertContains('5.2', $codes);
-        $this->assertContains('5.3', $codes);
+        $this->assertContains('5215', $codes);
+        $this->assertContains('5304', $codes);
     }
 
     public function test_invoice_entry_splits_between_cash_customer_revenue_and_cogs(): void
@@ -193,12 +194,12 @@ class AccountingArchitectureTest extends TestCase
         $entry = app(AccountingService::class)->syncInvoiceEntry($invoice->fresh(['items.product', 'customer.account', 'paymentMethod']), $user);
         $lines = $entry->lines->keyBy('account.code');
 
-        $this->assertSame(60.0, (float) $lines['1.1']->debit);
-        $this->assertSame(55.0, (float) $lines['1.3.C' . $customer->id]->debit);
-        $this->assertSame(100.0, (float) $lines['3.1.P' . $product->id]->credit);
-        $this->assertSame(15.0, (float) $lines['2.3']->credit);
-        $this->assertSame(40.0, (float) $lines['4.4.P' . $product->id]->debit);
-        $this->assertSame(40.0, (float) $lines['1.4.P' . $product->id]->credit);
+        $this->assertSame(60.0, (float) $lines['110201']->debit);
+        $this->assertSame(55.0, (float) $lines['1103-C' . $customer->id]->debit);
+        $this->assertSame(100.0, (float) $lines['4101-P' . $product->id]->credit);
+        $this->assertSame(15.0, (float) $lines['2105']->credit);
+        $this->assertSame(40.0, (float) $lines['5101-P' . $product->id]->debit);
+        $this->assertSame(40.0, (float) $lines['1106-P' . $product->id]->credit);
     }
 
     public function test_purchase_entry_splits_between_cash_supplier_inventory_and_vat(): void
@@ -271,10 +272,10 @@ class AccountingArchitectureTest extends TestCase
         $entry = app(AccountingService::class)->syncPurchaseEntry($purchase->fresh(['items.product', 'supplier.account', 'paymentMethod']), $user);
         $lines = $entry->lines->keyBy('account.code');
 
-        $this->assertSame(100.0, (float) $lines['1.4.P' . $product->id]->debit);
-        $this->assertSame(15.0, (float) $lines['1.5']->debit);
-        $this->assertSame(30.0, (float) $lines['1.2']->credit);
-        $this->assertSame(85.0, (float) $lines['2.1.S' . $supplier->id]->credit);
+        $this->assertSame(100.0, (float) $lines['1106-P' . $product->id]->debit);
+        $this->assertSame(15.0, (float) $lines['2105']->debit);
+        $this->assertSame(30.0, (float) $lines['110201']->credit);
+        $this->assertSame(85.0, (float) $lines['2101-S' . $supplier->id]->credit);
     }
 
     public function test_supplier_payment_entry_uses_supplier_account_and_default_settlement_account(): void
@@ -306,8 +307,8 @@ class AccountingArchitectureTest extends TestCase
         $entry = app(AccountingService::class)->createSupplierPaymentEntry($supplier->fresh(), 75, $user, 'PAY-1001');
         $lines = $entry->lines->keyBy('account.code');
 
-        $this->assertSame(75.0, (float) $lines['2.1.S' . $supplier->id]->debit);
-        $this->assertSame(75.0, (float) $lines['1.1']->credit);
+        $this->assertSame(75.0, (float) $lines['2101-S' . $supplier->id]->debit);
+        $this->assertSame(75.0, (float) $lines['110201']->credit);
     }
 
     public function test_resync_company_accounting_action_rebuilds_linked_accounts_and_journal_entries(): void
@@ -409,8 +410,8 @@ class AccountingArchitectureTest extends TestCase
             'total' => 69,
         ]);
 
-        $expenseAccount = app(ChartOfAccountsSynchronizer::class)->ensureBaseAccounts($company)->get('4.2');
-        $paymentAccount = app(ChartOfAccountsSynchronizer::class)->ensureBaseAccounts($company)->get('1.2');
+        $expenseAccount = app(ChartOfAccountsSynchronizer::class)->ensureBaseAccounts($company)->get('5204');
+        $paymentAccount = app(ChartOfAccountsSynchronizer::class)->ensureBaseAccounts($company)->get('110201');
 
         Expense::create([
             'expense_number' => 'EXP-RSYNC-1',

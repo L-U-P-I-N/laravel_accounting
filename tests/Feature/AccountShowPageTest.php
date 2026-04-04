@@ -48,8 +48,8 @@ class AccountShowPageTest extends TestCase
 
         $parent = Account::create([
             'company_id' => $company->id,
-            'code' => '1.10',
-            'name' => 'Current Assets',
+            'code' => '11',
+            'name' => 'أصول متداولة',
             'name_ar' => 'الأصول المتداولة',
             'account_type' => 'asset',
             'parent_id' => $root->id,
@@ -60,11 +60,12 @@ class AccountShowPageTest extends TestCase
 
         $account = Account::create([
             'company_id' => $company->id,
-            'code' => '1.1',
-            'name' => 'Cash',
-            'name_ar' => 'الصندوق',
+            'code' => '110101',
+            'name' => 'النقدية في الخزينة',
+            'name_ar' => 'النقدية في الخزينة',
             'account_type' => 'asset',
             'parent_id' => $parent->id,
+            'allows_direct_transactions' => true,
             'is_active' => true,
             'is_system' => false,
             'balance' => 250,
@@ -72,8 +73,8 @@ class AccountShowPageTest extends TestCase
 
         $child = Account::create([
             'company_id' => $company->id,
-            'code' => '1.1.1',
-            'name' => 'Branch Cash',
+            'code' => '110101-1',
+            'name' => 'صندوق الفرع',
             'name_ar' => 'صندوق الفرع',
             'account_type' => 'asset',
             'parent_id' => $account->id,
@@ -113,9 +114,10 @@ class AccountShowPageTest extends TestCase
         $view = app(AccountingPageController::class)->showAccount($request, $account);
         $content = $view->render();
 
-        $this->assertStringContainsString('الصندوق', $content);
+        $this->assertStringContainsString('النقدية في الخزينة', $content);
         $this->assertStringContainsString('الأصول المتداولة', $content);
         $this->assertStringContainsString('صندوق الفرع', $content);
+        $this->assertStringContainsString('قابل للدفع/التحصيل', $content);
         $this->assertStringContainsString('JRN-2026-1001', $content);
         $this->assertStringContainsString('حساب أب فرعي', $content);
     }

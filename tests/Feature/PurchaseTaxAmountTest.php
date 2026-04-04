@@ -156,7 +156,7 @@ class PurchaseTaxAmountTest extends TestCase
         $this->assertSame('partial', $purchase->payment_status);
         $this->assertSame(50.0, (float) $purchase->paid_amount);
         $this->assertSame(180.0, (float) $purchase->balance_due);
-        $this->assertNotNull($purchase->payment_method_id);
+        $this->assertNull($purchase->payment_method_id);
         $this->assertSame('2026-03-27', optional($purchase->payment_date)?->toDateString());
 
         $updateRequest = Request::create('/purchases/' . $purchase->id, 'PUT', [
@@ -183,7 +183,7 @@ class PurchaseTaxAmountTest extends TestCase
         $this->assertSame('paid', $purchase->payment_status);
         $this->assertSame(230.0, (float) $purchase->paid_amount);
         $this->assertSame(0.0, (float) $purchase->balance_due);
-        $this->assertNotNull($purchase->payment_method_id);
+        $this->assertNull($purchase->payment_method_id);
         $this->assertSame('2026-03-28', optional($purchase->payment_date)?->toDateString());
     }
 

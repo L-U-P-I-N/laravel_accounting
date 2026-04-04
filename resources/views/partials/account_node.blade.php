@@ -250,7 +250,7 @@
                     @endif
                     <div class="flex-grow-1">
                         <h3 class="coa-node-title">{{ $account->name }}</h3>
-                        @if ($account->name_ar)
+                        @if ($account->name_ar && $account->name_ar !== $account->name)
                             <div class="coa-node-subtitle">{{ $account->name_ar }}</div>
                         @endif
                         <div class="coa-node-meta">
@@ -260,6 +260,9 @@
                             </span>
                             @if ($account->is_system)
                                 <span class="coa-node-chip"><i class="fas fa-shield-halved"></i> حساب نظام</span>
+                            @endif
+                            @if ($account->allows_direct_transactions)
+                                <span class="coa-node-chip"><i class="fas fa-money-bill-transfer"></i> دفع/تحصيل مباشر</span>
                             @endif
                             @if ($hasChildren)
                                 <span class="coa-node-chip"><i class="fas fa-code-branch"></i> {{ $account->children->count() }} فروع</span>

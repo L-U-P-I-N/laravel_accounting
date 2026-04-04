@@ -279,7 +279,6 @@
                 default => 'danger',
             };
             $showPaymentStatus = $paymentStatusOptions[$purchase->payment_status] ?? 'غير محدد';
-            $showPaymentMethod = $purchase->paymentMethod?->name ?? 'غير محدد';
             $showAttachmentUrl = $purchase->attachment_path ? route('purchases.attachment', $purchase) : null;
         @endphp
         <div class="modal fade" id="showPurchaseModal{{ $purchase->id }}" tabindex="-1" aria-hidden="true">
@@ -299,10 +298,9 @@
                             <div class="col-md-3"><div class="list-card mb-0"><strong>الحالة:</strong><div class="mt-1"><span class="badge bg-{{ $showPurchaseClass }}">{{ $statusOptions[$purchase->status] ?? 'ملغي' }}</span></div></div></div>
                         </div>
                         <div class="row g-3 mb-4">
-                            <div class="col-md-3"><div class="list-card mb-0"><strong>رقم فاتورة المورد:</strong><div class="text-muted mt-1">{{ $purchase->supplier_invoice_number ?: '-' }}</div></div></div>
-                            <div class="col-md-3"><div class="list-card mb-0"><strong>طريقة الدفع:</strong><div class="text-muted mt-1">{{ $showPaymentMethod }}</div></div></div>
-                            <div class="col-md-3"><div class="list-card mb-0"><strong>حالة الدفع:</strong><div class="mt-1"><span class="badge bg-{{ $purchase->payment_status === 'paid' ? 'success' : ($purchase->payment_status === 'partial' ? 'info' : 'warning') }}">{{ $showPaymentStatus }}</span></div></div></div>
-                            <div class="col-md-3"><div class="list-card mb-0"><strong>تاريخ الدفع:</strong><div class="text-muted mt-1">{{ optional($purchase->payment_date)->format('Y-m-d') ?: '-' }}</div></div></div>
+                            <div class="col-md-4"><div class="list-card mb-0"><strong>رقم فاتورة المورد:</strong><div class="text-muted mt-1">{{ $purchase->supplier_invoice_number ?: '-' }}</div></div></div>
+                            <div class="col-md-4"><div class="list-card mb-0"><strong>حالة الدفع:</strong><div class="mt-1"><span class="badge bg-{{ $purchase->payment_status === 'paid' ? 'success' : ($purchase->payment_status === 'partial' ? 'info' : 'warning') }}">{{ $showPaymentStatus }}</span></div></div></div>
+                            <div class="col-md-4"><div class="list-card mb-0"><strong>تاريخ الدفع:</strong><div class="text-muted mt-1">{{ optional($purchase->payment_date)->format('Y-m-d') ?: '-' }}</div></div></div>
                         </div>
 
                         <div class="table-responsive">
@@ -360,7 +358,7 @@
                             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                                 <div>
                                     <strong>سجل دفعات الشراء</strong>
-                                    <div class="text-muted small mt-1">كل دفعة جزئية تُحفظ كسجل مستقل مع المرجع وطريقة الدفع.</div>
+                                    <div class="text-muted small mt-1">كل دفعة جزئية تُحفظ كسجل مستقل مع المرجع.</div>
                                 </div>
                                 @if ($canManagePurchases && (float) $purchase->balance_due > 0 && ! in_array($purchase->status, ['draft', 'cancelled'], true))
                                     <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#purchasePaymentModal{{ $purchase->id }}">
@@ -374,7 +372,6 @@
                                         <tr>
                                             <th>التاريخ</th>
                                             <th>المرجع</th>
-                                            <th>الطريقة</th>
                                             <th>المبلغ</th>
                                             <th>ملاحظات</th>
                                         </tr>
@@ -384,13 +381,12 @@
                                             <tr>
                                                 <td>{{ optional($payment->payment_date)->format('Y-m-d') ?: '-' }}</td>
                                                 <td>{{ $payment->reference ?: '-' }}</td>
-                                                <td>{{ $payment->paymentMethod?->name ?? 'غير محدد' }}</td>
                                                 <td>{{ number_format((float) $payment->amount, 2) }} {{ $company->currency }}</td>
                                                 <td>{{ $payment->notes ?: '-' }}</td>
                                             </tr>
                                         @empty
                                             <tr>
-                                                <td colspan="5" class="text-center text-muted">لا توجد دفعات مسجلة على هذا الطلب حتى الآن.</td>
+                                                <td colspan="4" class="text-center text-muted">لا توجد دفعات مسجلة على هذا الطلب حتى الآن.</td>
                                             </tr>
                                         @endforelse
                                     </tbody>
@@ -440,15 +436,6 @@
                                     <div class="col-md-6">
                                         <label class="form-label">تاريخ الدفعة</label>
                                         <input type="date" name="payment_date" class="form-control" value="{{ $paymentPurchaseModalHasErrors ? old('payment_date', now()->format('Y-m-d')) : now()->format('Y-m-d') }}" required>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label">طريقة الدفع</label>
-                                        <select name="payment_method_id" class="form-select">
-                                            <option value="">لم يتم التحديد</option>
-                                            @foreach ($paymentMethods as $paymentMethod)
-                                                <option value="{{ $paymentMethod->id }}" {{ (string) ($paymentPurchaseModalHasErrors ? old('payment_method_id', $purchase->payment_method_id ?: $defaultPaymentMethodId) : ($purchase->payment_method_id ?: $defaultPaymentMethodId)) === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
-                                            @endforeach
-                                        </select>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">المرجع</label>
@@ -544,20 +531,6 @@
                                     <div class="col-md-4" data-paid-amount-container>
                                         <label class="form-label">المبلغ المدفوع</label>
                                         <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ $editPurchaseModalHasErrors ? old('paid_amount', number_format((float) $purchase->paid_amount, 2, '.', '')) : number_format((float) $purchase->paid_amount, 2, '.', '') }}" data-purchase-paid-amount>
-                                    </div>
-                                    <div class="col-md-4" data-payment-method-container>
-                                        <div data-payment-method-input>
-                                            <label class="form-label">طريقة الدفع</label>
-                                            <select name="payment_method_id" class="form-select">
-                                                <option value="" {{ ($editPurchaseModalHasErrors ? old('payment_method_id') : $purchase->payment_method_id) ? '' : 'selected' }}>لم يتم التحديد</option>
-                                                @foreach ($paymentMethods as $paymentMethod)
-                                                    <option value="{{ $paymentMethod->id }}" {{ (string) ($editPurchaseModalHasErrors ? old('payment_method_id') : $purchase->payment_method_id) === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
-                                                @endforeach
-                                            </select>
-                                        </div>
-                                        {{-- <div class="alert alert-info mt-2 d-none" data-payables-note>
-                                            عند اختيار حالة الدفع "أجل" يتم ربط الفاتورة تلقائياً بحساب الدائنين الدائمين.
-                                        </div> --}}
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">رقم فاتورة المورد (اختياري)</label>
@@ -699,18 +672,6 @@
                             <div class="col-md-4" data-paid-amount-container>
                                 <label class="form-label">المبلغ المدفوع</label>
                                 <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ old('paid_amount', '0') }}" data-purchase-paid-amount>
-                            </div>
-                            <div class="col-md-4" data-payment-method-container>
-                                <div data-payment-method-input>
-                                    <label class="form-label">طريقة الدفع</label>
-                                    <select name="payment_method_id" class="form-select">
-                                        <option value="" {{ old('payment_method_id', $defaultPaymentMethodId) ? '' : 'selected' }}>لم يتم التحديد</option>
-                                        @foreach ($paymentMethods as $paymentMethod)
-                                            <option value="{{ $paymentMethod->id }}" {{ (string) old('payment_method_id', $defaultPaymentMethodId) === (string) $paymentMethod->id ? 'selected' : '' }}>{{ $paymentMethod->name }}</option>
-                                        @endforeach
-                                    </select>
-                                </div>
-
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">رقم فاتورة المورد (اختياري)</label>
@@ -991,31 +952,19 @@ function addPurchaseRow(form) {
 
 function initializePurchasePaymentBehavior(form) {
     const statusSelect = form.querySelector('[data-payment-status-select]');
-    const methodWrapper = form.querySelector('[data-payment-method-input]');
     const paidAmountWrapper = form.querySelector('[data-paid-amount-container]');
     const paidAmountInput = form.querySelector('[data-purchase-paid-amount]');
-    const payablesNote = form.querySelector('[data-payables-note]');
-    const methodSelect = methodWrapper?.querySelector('select[name="payment_method_id"]');
 
-    if (!statusSelect || !methodWrapper) {
+    if (!statusSelect) {
         return;
     }
 
     const togglePaymentPresentation = () => {
         const isDeferred = statusSelect.value === 'pending';
         const isPaid = statusSelect.value === 'paid';
-        methodWrapper.classList.toggle('d-none', isDeferred);
         paidAmountWrapper?.classList.toggle('d-none', isDeferred);
-        payablesNote?.classList.toggle('d-none', !isDeferred);
 
         const currentTotal = purchaseNumericValue(form.querySelector('[data-purchase-total]')?.textContent);
-
-        if (methodSelect) {
-            methodSelect.disabled = isDeferred;
-            if (isDeferred) {
-                methodSelect.value = '';
-            }
-        }
 
         if (paidAmountInput) {
             paidAmountInput.disabled = isDeferred || isPaid;

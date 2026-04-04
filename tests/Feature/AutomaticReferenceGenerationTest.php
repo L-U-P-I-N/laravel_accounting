@@ -39,7 +39,7 @@ class AutomaticReferenceGenerationTest extends TestCase
     {
         [$company, $user] = $this->createCompanyAndOwner();
         $expenseAccount = $this->createAccount($company, '6900', 'expense', 'Misc Expense');
-        $paymentAccount = $this->createAccount($company, '1102', 'asset', 'Bank Account');
+        $paymentAccount = $this->createAccount($company, '110201', 'asset', 'Bank Account', null, true);
 
         $request = Request::create('/expenses', 'POST', [
             'name' => 'Office Snacks',
@@ -98,7 +98,7 @@ class AutomaticReferenceGenerationTest extends TestCase
         $this->createAccount($company, '2000', 'liability', 'Liabilities');
         $this->createAccount($company, '2100', 'liability', 'Accounts Payable');
         $this->createAccount($company, '1100', 'asset', 'Cash & Bank');
-        $this->createAccount($company, '1102', 'asset', 'Bank Account');
+        $this->createAccount($company, '110201', 'asset', 'Bank Account', null, true);
 
         $supplier = Supplier::create([
             'company_id' => $company->id,
@@ -165,7 +165,7 @@ class AutomaticReferenceGenerationTest extends TestCase
         return [$company, $user];
     }
 
-    private function createAccount(Company $company, string $code, string $type, string $name, ?Account $parent = null): Account
+    private function createAccount(Company $company, string $code, string $type, string $name, ?Account $parent = null, bool $allowsDirectTransactions = false): Account
     {
         return Account::create([
             'company_id' => $company->id,
@@ -174,6 +174,7 @@ class AutomaticReferenceGenerationTest extends TestCase
             'name_ar' => $name,
             'account_type' => $type,
             'parent_id' => $parent?->id,
+            'allows_direct_transactions' => $allowsDirectTransactions,
             'is_active' => true,
             'is_system' => false,
             'balance' => 0,

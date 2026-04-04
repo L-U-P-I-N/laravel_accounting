@@ -13,6 +13,7 @@ use App\Models\Purchase;
 use App\Models\Employee;
 use App\Models\Role;
 use App\Support\AccessControl;
+use App\Support\ChartOfAccountsSynchronizer;
 use Illuminate\Support\Facades\Hash;
 
 class AdminSeeder extends Seeder
@@ -80,55 +81,7 @@ class AdminSeeder extends Seeder
             $user->roles()->sync([$viewerRole->id]);
         }
 
-        // Create default accounts for the company
-        $accounts = [
-            // Assets
-            ['name' => 'النقدية والبنوك', 'account_type' => 'asset', 'code' => '1000', 'parent_id' => null],
-            ['name' => 'النقدية في الصندوق', 'account_type' => 'asset', 'code' => '1010', 'parent_id' => null],
-            ['name' => 'الحسابات الجارية البنكية', 'account_type' => 'asset', 'code' => '1020', 'parent_id' => null],
-            ['name' => 'حسابات المدينين', 'account_type' => 'asset', 'code' => '1100', 'parent_id' => null],
-            ['name' => 'المخزون', 'account_type' => 'asset', 'code' => '1200', 'parent_id' => null],
-            ['name' => 'الأصول الثابتة', 'account_type' => 'asset', 'code' => '1300', 'parent_id' => null],
-            ['name' => 'معدات ومهمات', 'account_type' => 'asset', 'code' => '1310', 'parent_id' => null],
-            ['name' => 'أثاث ومعدات مكتبية', 'account_type' => 'asset', 'code' => '1320', 'parent_id' => null],
-
-            // Liabilities
-            ['name' => 'حسابات الدائنين', 'account_type' => 'liability', 'code' => '2000', 'parent_id' => null],
-            ['name' => 'القروض والسلف', 'account_type' => 'liability', 'code' => '2100', 'parent_id' => null],
-            ['name' => 'ضريبة القيمة المضافة المستحقة', 'account_type' => 'liability', 'code' => '2200', 'parent_id' => null],
-
-            // Equity
-            ['name' => 'رأس المال', 'account_type' => 'equity', 'code' => '3000', 'parent_id' => null],
-            ['name' => 'الأرباح المحتجزة', 'account_type' => 'equity', 'code' => '3100', 'parent_id' => null],
-
-            // Revenue
-            ['name' => 'الإيرادات التشغيلية', 'account_type' => 'revenue', 'code' => '4000', 'parent_id' => null],
-            ['name' => 'المبيعات', 'account_type' => 'revenue', 'code' => '4100', 'parent_id' => null],
-            ['name' => 'مبيعات الخدمات', 'account_type' => 'revenue', 'code' => '4200', 'parent_id' => null],
-            ['name' => 'إيرادات أخرى', 'account_type' => 'revenue', 'code' => '4300', 'parent_id' => null],
-
-            // Expenses
-            ['name' => 'المصاريف التشغيلية', 'account_type' => 'expense', 'code' => '5000', 'parent_id' => null],
-            ['name' => 'تكلفة المبيعات', 'account_type' => 'expense', 'code' => '5100', 'parent_id' => null],
-            ['name' => 'الإيجار', 'account_type' => 'expense', 'code' => '5200', 'parent_id' => null],
-            ['name' => 'الرواتب والأجور', 'account_type' => 'expense', 'code' => '5300', 'parent_id' => null],
-            ['name' => 'المرافق والخدمات', 'account_type' => 'expense', 'code' => '5400', 'parent_id' => null],
-            ['name' => 'التسويق والإعلان', 'account_type' => 'expense', 'code' => '5500', 'parent_id' => null],
-            ['name' => 'مصاريف إدارية وعامة', 'account_type' => 'expense', 'code' => '5600', 'parent_id' => null],
-        ];
-
-        foreach ($accounts as $accountData) {
-            Account::query()->updateOrCreate([
-                'company_id' => $company->id,
-                'code' => $accountData['code'],
-            ], [
-                'name' => $accountData['name'],
-                'account_type' => $accountData['account_type'],
-                'parent_id' => $accountData['parent_id'],
-                'balance' => 0,
-                'is_active' => true,
-            ]);
-        }
+        app(ChartOfAccountsSynchronizer::class)->ensureBaseAccounts($company);
 
         // Create sample customers
         $customers = [

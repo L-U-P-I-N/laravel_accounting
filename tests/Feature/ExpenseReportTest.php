@@ -9,6 +9,7 @@ use App\Models\Expense;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\ViewErrorBag;
 use Tests\TestCase;
 
 class ExpenseReportTest extends TestCase
@@ -57,12 +58,13 @@ class ExpenseReportTest extends TestCase
 
         $paymentAccount = Account::create([
             'company_id' => $company->id,
-            'code' => '1101',
-            'name' => 'Cash',
-            'name_ar' => 'الصندوق',
+            'code' => '110201',
+            'name' => 'Bank Account',
+            'name_ar' => 'حساب بنكي',
             'account_type' => 'asset',
             'is_active' => true,
             'is_system' => false,
+            'allows_direct_transactions' => true,
             'balance' => 0,
         ]);
 
@@ -104,12 +106,13 @@ class ExpenseReportTest extends TestCase
             'expense_account_id' => $expenseAccount->id,
         ]);
         $request->setUserResolver(fn () => $user);
+        view()->share('errors', new ViewErrorBag());
 
-        $view = app(AccountingPageController::class)->expensesReport($request);
+        $view = app(AccountingPageController::class)->expenses($request);
         $data = $view->getData();
 
         $this->assertCount(1, $data['expenses']);
         $this->assertSame('Printer Paper', $data['expenses']->first()->name);
-        $this->assertSame(100.0, $data['summary']['total']);
+        $this->assertSame(100.0, (float) $data['expenses']->sum('total'));
     }
 }

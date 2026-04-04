@@ -15,7 +15,6 @@ use App\Models\InventoryMovement;
 use App\Models\JournalEntry;
 use App\Models\JournalLine;
 use App\Models\Payment;
-use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
@@ -128,7 +127,7 @@ class AccountingPageController extends Controller
                 'company_id' => $company->id,
                 'branch_id' => $salesContext['branch_id'],
                 'sales_channel_id' => $validated['sales_channel_id'],
-                'payment_method_id' => $validated['payment_method_id'],
+                'payment_method_id' => null,
                 'invoice_date' => $validated['invoice_date'],
                 'due_date' => $validated['due_date'] ?? null,
                 'subtotal' => $totals['subtotal'],
@@ -147,7 +146,7 @@ class AccountingPageController extends Controller
 
             $this->syncInvoiceItems($invoice, $validated);
 
-            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentMethod']);
+            $freshInvoice = $invoice->fresh(['items.product', 'customer']);
             $journalEntry = null;
 
             if (($validated['status'] ?? 'sent') !== 'draft') {
@@ -203,7 +202,7 @@ class AccountingPageController extends Controller
                 'due_date' => $validated['due_date'] ?? null,
                 'branch_id' => $salesContext['branch_id'],
                 'sales_channel_id' => $validated['sales_channel_id'],
-                'payment_method_id' => $validated['payment_method_id'],
+                'payment_method_id' => null,
                 'subtotal' => $totals['subtotal'],
                 'tax_amount' => $totals['tax_amount'],
                 'total' => $totals['total'],
@@ -220,7 +219,7 @@ class AccountingPageController extends Controller
 
             $this->syncInvoiceItems($invoice, $validated);
 
-            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentMethod']);
+            $freshInvoice = $invoice->fresh(['items.product', 'customer']);
             $journalEntry = null;
 
             if ($this->shouldConsumeInvoiceStock($nextStatus)) {
@@ -292,6 +291,11 @@ class AccountingPageController extends Controller
         return view('invoice_view', compact('company', 'invoice', 'items', 'journalEntry'));
     }
 
+    public function invoicePdf(Request $request, Invoice $invoice): View
+    {
+        return $this->invoiceShow($request, $invoice);
+    }
+
     public function sendInvoice(Request $request, Invoice $invoice): RedirectResponse
     {
         $company = $this->company($request);
@@ -319,7 +323,7 @@ class AccountingPageController extends Controller
             $this->consumeInvoiceStock($company->id, $stockRequirements);
 
             $invoice->update(['status' => 'sent']);
-            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentMethod']);
+            $freshInvoice = $invoice->fresh(['items.product', 'customer']);
             $journalEntry = $this->accountingService->syncInvoiceEntry($freshInvoice, $user);
             $this->inventoryMovementService->syncInvoice($freshInvoice);
             $this->paymentSyncService->syncInvoicePayment($freshInvoice, $journalEntry);
@@ -336,15 +340,11 @@ class AccountingPageController extends Controller
         $dateFrom = $request->string('date_from')->toString();
         $dateTo = $request->string('date_to')->toString();
         $sortDirection = $this->sortDirection($request);
-        $defaultPaymentMethodId = $this->defaultPaymentMethodId($company->id);
-
         $purchases = Purchase::with([
                 'supplier',
                 'items.product',
-                'paymentMethod',
                 'payments' => fn ($query) => $query
                     ->where('payment_category', 'purchase_payment')
-                    ->with('paymentMethod')
                     ->orderBy('payment_date', $sortDirection)
                     ->orderBy('id', $sortDirection),
             ])
@@ -359,11 +359,6 @@ class AccountingPageController extends Controller
 
         $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get();
         $products = Product::forCompany($company->id)->active()->orderBy('name')->get();
-        $paymentMethods = PaymentMethod::query()
-            ->where('company_id', $company->id)
-            ->orderByDesc('is_default')
-            ->orderBy('name')
-            ->get();
         $pendingPurchasesCount = $purchases->where('status', 'pending')->count();
         $paidPurchasesCount = $purchases->whereIn('status', ['approved', 'paid'])->count();
 
@@ -372,13 +367,11 @@ class AccountingPageController extends Controller
             'purchases' => $purchases,
             'suppliers' => $suppliers,
             'products' => $products,
-            'paymentMethods' => $paymentMethods,
             'statusFilter' => $statusFilter,
             'supplierFilter' => $supplierFilter,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'sortDirection' => $sortDirection,
-            'defaultPaymentMethodId' => $defaultPaymentMethodId,
             'pendingPurchasesCount' => $pendingPurchasesCount,
             'paidPurchasesCount' => $paidPurchasesCount,
         ]);
@@ -390,13 +383,12 @@ class AccountingPageController extends Controller
         $validated = $this->validatePurchaseData($request, $company->id);
         $paymentData = $this->resolvePurchasePaymentData($validated, $this->calculatePurchaseTotals($validated));
         $paymentStatus = $paymentData['payment_status'];
-        $paymentMethodId = $paymentStatus === 'pending' ? null : ($validated['payment_method_id'] ?? null);
         $paymentDate = $paymentStatus === 'pending' ? null : ($validated['payment_date'] ?? null);
 
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        DB::transaction(function () use ($company, $validated, $user, $request, $paymentData, $paymentStatus, $paymentMethodId, $paymentDate) {
+        DB::transaction(function () use ($company, $validated, $user, $request, $paymentData, $paymentStatus, $paymentDate) {
             $totals = $this->calculatePurchaseTotals($validated);
             $attachmentPath = $this->handlePurchaseAttachmentUpload($request);
 
@@ -415,7 +407,7 @@ class AccountingPageController extends Controller
                 'balance_due' => $paymentData['balance_due'],
                 'status' => $validated['status'] ?? 'draft',
                 'payment_status' => $paymentStatus,
-                'payment_method_id' => $paymentMethodId,
+                'payment_method_id' => null,
                 'payment_method' => null,
                 'payment_date' => $paymentDate,
                 'notes' => $validated['notes'] ?? null,
@@ -429,7 +421,7 @@ class AccountingPageController extends Controller
                 $this->applyPurchaseStock($company->id, $this->purchaseStockRequirementsFromValidated($validated));
             }
 
-            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentMethod']);
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier']);
             $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
             $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
 
@@ -458,13 +450,12 @@ class AccountingPageController extends Controller
             $existingRecordedPayments > 1 ? (float) $purchase->paid_amount : null,
         );
         $paymentStatus = $paymentData['payment_status'] ?? $purchase->payment_status;
-        $paymentMethodId = $paymentStatus === 'pending' ? null : ($validated['payment_method_id'] ?? null);
         $paymentDate = $paymentStatus === 'pending' ? null : ($validated['payment_date'] ?? null);
 
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        DB::transaction(function () use ($purchase, $validated, $company, $user, $request, $paymentData, $paymentStatus, $paymentMethodId, $paymentDate) {
+        DB::transaction(function () use ($purchase, $validated, $company, $user, $request, $paymentData, $paymentStatus, $paymentDate) {
             $purchase->loadMissing(['items.product']);
             $hadAppliedStock = $this->inventoryMovementService->hasMovementsForSource($purchase);
 
@@ -488,7 +479,7 @@ class AccountingPageController extends Controller
                 'balance_due' => $paymentData['balance_due'],
                 'status' => $validated['status'] ?? $purchase->status,
                 'payment_status' => $paymentStatus,
-                'payment_method_id' => $paymentMethodId,
+                'payment_method_id' => null,
                 'payment_method' => null,
                 'payment_date' => $paymentDate,
                 'notes' => $validated['notes'] ?? null,
@@ -501,7 +492,7 @@ class AccountingPageController extends Controller
                 $this->applyPurchaseStock($company->id, $this->purchaseStockRequirementsFromValidated($validated));
             }
 
-            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentMethod']);
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier']);
             $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
             $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
 
@@ -528,7 +519,7 @@ class AccountingPageController extends Controller
         $user = $request->user();
 
         DB::transaction(function () use ($purchase, $user) {
-            $purchase->loadMissing(['items.product', 'supplier', 'paymentMethod']);
+            $purchase->loadMissing(['items.product', 'supplier']);
 
             if (! $this->inventoryMovementService->hasMovementsForSource($purchase)) {
                 $this->applyPurchaseStock((int) $purchase->company_id, $this->purchaseStockRequirementsFromItems($purchase->items));
@@ -538,7 +529,7 @@ class AccountingPageController extends Controller
                 'status' => 'approved',
             ]);
 
-            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentMethod']);
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier']);
             $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
             $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
             $this->inventoryMovementService->syncPurchase($freshPurchase);
@@ -564,10 +555,6 @@ class AccountingPageController extends Controller
             'purchase_modal' => ['nullable', 'string'],
             'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max((float) $purchase->balance_due, 0.01)],
             'payment_date' => ['required', 'date'],
-            'payment_method_id' => [
-                'nullable',
-                Rule::exists('payment_methods', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
-            ],
             'payment_reference' => ['nullable', 'string', 'max:100'],
             'payment_notes' => ['nullable', 'string', 'max:1000'],
         ], [
@@ -579,16 +566,13 @@ class AccountingPageController extends Controller
 
         $paymentAmount = round((float) $validated['payment_amount'], 2);
         $paymentDate = Carbon::parse($validated['payment_date'])->toDateString();
-        $paymentMethodId = isset($validated['payment_method_id'])
-            ? (int) $validated['payment_method_id']
-            : $this->defaultPaymentMethodId($company->id);
         $paymentReference = trim((string) ($validated['payment_reference'] ?? ''));
 
         if ($paymentReference === '') {
             $paymentReference = $this->referenceGenerator->nextPurchasePaymentReference($company->id);
         }
 
-        DB::transaction(function () use ($purchase, $paymentAmount, $paymentDate, $paymentMethodId, $paymentReference, $validated, $user) {
+        DB::transaction(function () use ($purchase, $paymentAmount, $paymentDate, $paymentReference, $validated, $user) {
             $lockedPurchase = Purchase::query()
                 ->with('supplier')
                 ->whereKey($purchase->id)
@@ -604,7 +588,7 @@ class AccountingPageController extends Controller
                 'balance_due' => $updatedBalance,
                 'payment_status' => $this->purchasePaymentStatus($updatedPaidAmount, (float) $lockedPurchase->total),
                 'status' => $this->purchaseStatusAfterPayment((string) $lockedPurchase->status, $updatedPaidAmount, $updatedBalance),
-                'payment_method_id' => $paymentMethodId,
+                'payment_method_id' => null,
                 'payment_method' => null,
                 'payment_date' => $paymentDate,
             ]);
@@ -622,7 +606,7 @@ class AccountingPageController extends Controller
                 paymentDate: $paymentDate,
                 reference: $paymentReference,
                 entry: $journalEntry,
-                paymentMethodId: $paymentMethodId,
+                paymentMethodId: null,
                 notes: trim((string) ($validated['payment_notes'] ?? '')) ?: null,
             );
         });
@@ -926,9 +910,7 @@ class AccountingPageController extends Controller
             $paymentReference = $this->referenceGenerator->nextSupplierPaymentReference($company->id);
         }
 
-        $defaultPaymentMethodId = $this->defaultPaymentMethodId((int) $supplier->company_id);
-
-        DB::transaction(function () use ($supplier, $paymentAmount, $user, $paymentReference, $defaultPaymentMethodId) {
+        DB::transaction(function () use ($supplier, $paymentAmount, $user, $paymentReference) {
             $remainingAmount = $paymentAmount;
 
             $openPurchases = Purchase::where('company_id', $supplier->company_id)
@@ -966,7 +948,7 @@ class AccountingPageController extends Controller
                 paymentDate: now()->toDateString(),
                 reference: $paymentReference,
                 entry: $journalEntry,
-                paymentMethodId: $defaultPaymentMethodId,
+                paymentMethodId: null,
             );
         });
 
@@ -1042,16 +1024,8 @@ class AccountingPageController extends Controller
             ->get(['id', 'name', 'reference', 'expense_date']);
 
         $paymentAccounts = Account::where('company_id', $company->id)
-            ->whereIn('account_type', ['asset', 'liability'])
+            ->where('allows_direct_transactions', true)
             ->where('is_active', true)
-            ->where(function ($query) {
-                $query->whereIn('code', ['1.1', '1.2', '2', '2.1'])
-                    ->orWhere('name', 'like', '%Bank%')
-                    ->orWhere('name', 'like', '%Cash%')
-                    ->orWhere('name_ar', 'like', '%بنكي%')
-                    ->orWhere('name_ar', 'like', '%صندوق%')
-                    ->orWhere('name_ar', 'like', '%دائن%');
-            })
             ->orderBy('code')
             ->get();
 
@@ -1326,6 +1300,7 @@ class AccountingPageController extends Controller
             'name_ar' => $validated['name_ar'] ?? null,
             'account_type' => $validated['account_type'],
             'parent_id' => $parentId,
+            'allows_direct_transactions' => (bool) ($validated['allows_direct_transactions'] ?? false),
             'description' => $validated['description'] ?? null,
             'is_active' => $request->boolean('is_active', true),
             'is_system' => false,
@@ -1474,7 +1449,7 @@ class AccountingPageController extends Controller
         $sortDirection = $validated['sort_direction'] ?? 'desc';
 
         $payments = Payment::query()
-            ->with(['purchase.supplier', 'invoice.customer', 'supplier', 'paymentMethod'])
+            ->with(['purchase.supplier', 'invoice.customer', 'supplier'])
             ->where('company_id', $company->id)
             ->whereBetween('payment_date', [$dateFrom, $dateTo])
             ->when($reference !== '', fn ($query) => $query->where('reference', 'like', '%' . $reference . '%'))
@@ -1839,7 +1814,6 @@ class AccountingPageController extends Controller
             'transactions_by_branch' => ['section' => 'sales', 'icon' => 'fa-building-circle-arrow-right', 'title' => 'تقرير المعاملات في كل موقع', 'description' => 'حصر عدد معاملات البيع المنفذة في كل فرع أو موقع تشغيل.', 'query_preview' => "SELECT b.name, COUNT(s.id) AS total_transactions\nFROM sales s\nJOIN branches b ON s.branch_id = b.id\nGROUP BY b.name;"],
             'customer_product_sales' => ['section' => 'sales', 'icon' => 'fa-bag-shopping', 'title' => 'تقرير المنتجات المباعة للعميل', 'description' => 'تتبع المنتجات والكميات المباعة لكل عميل داخل الفترة المحددة.', 'query_preview' => "SELECT c.name, si.product_id, SUM(si.quantity)\nFROM sales_items si\nJOIN sales s ON si.sale_id = s.id\nJOIN customers c ON s.customer_id = c.id\nGROUP BY c.name, si.product_id;"],
             'sales_by_period' => ['section' => 'sales', 'icon' => 'fa-calendar-days', 'title' => 'تقرير المبيعات حسب الفترة الزمنية', 'description' => 'تجميع المبيعات زمنياً لمراقبة الاتجاهات اليومية داخل الفترة.', 'query_preview' => "SELECT DATE(sale_date) AS day, SUM(total_amount)\nFROM sales\nGROUP BY DATE(sale_date)\nORDER BY DATE(sale_date);"],
-            'sales_by_payment_method' => ['section' => 'sales', 'icon' => 'fa-money-check-dollar', 'title' => 'تقرير المبيعات من طرق الدفع', 'description' => 'إجمالي المبيعات موزعة حسب طريقة الدفع المختارة داخل نموذج البيع.', 'query_preview' => "SELECT pm.name, SUM(invoices.total)\nFROM invoices\nJOIN payment_methods pm ON pm.id = invoices.payment_method_id\nWHERE invoices.company_id = ?\nGROUP BY pm.name;"],
             'customer_statement' => ['section' => 'sales', 'icon' => 'fa-file-lines', 'title' => 'كشف حساب مدين', 'description' => 'إجمالي المبيعات والمدفوعات والمتبقي لكل عميل لعرض كشف حساب المدين.', 'query_preview' => "SELECT c.name, s.total_amount, p.amount AS paid, (s.total_amount - COALESCE(p.amount, 0)) AS remaining\nFROM sales s\nLEFT JOIN payments p ON s.id = p.invoice_id\nJOIN customers c ON s.customer_id = c.id;"],
             'inventory_snapshot' => ['section' => 'inventory', 'icon' => 'fa-cubes', 'title' => 'لقطة المخزون الحالية', 'description' => 'عرض الكميات الحالية وقيمة المخزون لكل منتج بصورة فورية.', 'query_preview' => "SELECT name, stock_quantity, cost_price, (stock_quantity * cost_price) AS inventory_value\nFROM products\nWHERE company_id = ?\nORDER BY inventory_value DESC;"],
             'low_stock_alerts' => ['section' => 'inventory', 'icon' => 'fa-triangle-exclamation', 'title' => 'تنبيهات انخفاض المخزون', 'description' => 'تحديد المنتجات التي وصلت إلى الحد الأدنى أو أقل منه لتسريع إعادة الطلب.', 'query_preview' => "SELECT name, stock_quantity, min_stock\nFROM products\nWHERE company_id = ? AND stock_quantity <= min_stock;"],
@@ -1877,7 +1851,7 @@ class AccountingPageController extends Controller
         return match ($interactiveKey) {
             'finance_income_statement' => 'income_statement',
             'finance_accounts' => 'account_balances',
-            'sales_by_category', 'sales_by_location', 'sales_by_invoice', 'sales_by_customer', 'sales_by_payment_status', 'customer_transactions', 'sales_by_employee', 'sales_by_channel', 'transactions_by_branch', 'customer_product_sales', 'sales_by_period', 'sales_by_payment_method' => 'product_sales',
+            'sales_by_category', 'sales_by_location', 'sales_by_invoice', 'sales_by_customer', 'sales_by_payment_status', 'customer_transactions', 'sales_by_employee', 'sales_by_channel', 'transactions_by_branch', 'customer_product_sales', 'sales_by_period' => 'product_sales',
             'finance_expenses' => 'expense_details',
             'finance_receivables', 'customer_statement' => 'receivables',
             'finance_payables', 'warehouse_suppliers', 'warehouse_incoming' => 'payables',
@@ -1903,7 +1877,6 @@ class AccountingPageController extends Controller
             'transactions_by_branch' => $this->transactionsByBranchInteractiveReport($company, $dateFrom, $dateTo),
             'customer_product_sales' => $this->customerProductSalesInteractiveReport($company, $dateFrom, $dateTo),
             'sales_by_period' => $this->salesByPeriodInteractiveReport($company, $dateFrom, $dateTo),
-            'sales_by_payment_method' => $this->salesByPaymentMethodInteractiveReport($company, $dateFrom, $dateTo),
             'customer_statement' => $this->customerStatementInteractiveReport($company, $dateFrom, $dateTo),
             'inventory_snapshot' => $this->inventorySnapshotInteractiveReport($company),
             'low_stock_alerts' => $this->lowStockAlertsInteractiveReport($company),
@@ -2214,15 +2187,14 @@ class AccountingPageController extends Controller
         $rows = DB::table('invoices as i')
             ->join('customers', 'customers.id', '=', 'i.customer_id')
             ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
-            ->leftJoin('payment_methods as pm', 'pm.id', '=', 'i.payment_method_id')
             ->leftJoin('sales_channels as sc', 'sc.id', '=', 'i.sales_channel_id')
             ->leftJoin('employees', 'employees.id', '=', 'i.employee_id')
             ->leftJoin('invoice_items as ii', 'ii.invoice_id', '=', 'i.id')
             ->where('i.company_id', $company->id)
             ->whereIn('i.status', ['sent', 'partial', 'paid'])
             ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
-            ->groupBy('i.id', 'customers.name', 'customers.phone', 'b.name', 'i.invoice_number', 'i.invoice_date', 'i.paid_amount', 'i.total', 'pm.name', 'sc.name', 'employees.first_name', 'employees.last_name')
-            ->selectRaw("customers.name as customer_name, COALESCE(customers.phone, '') as customer_phone, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, i.invoice_number, i.invoice_date, COALESCE(SUM(ii.quantity), 0) as qty_per_transaction, i.paid_amount, i.total, COALESCE(NULLIF(pm.name, ''), 'غير محدد') as payment_method_name, COALESCE(NULLIF(sc.name, ''), 'غير محدد') as sales_channel_name, employees.first_name, employees.last_name")
+            ->groupBy('i.id', 'customers.name', 'customers.phone', 'b.name', 'i.invoice_number', 'i.invoice_date', 'i.paid_amount', 'i.total', 'sc.name', 'employees.first_name', 'employees.last_name')
+            ->selectRaw("customers.name as customer_name, COALESCE(customers.phone, '') as customer_phone, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, i.invoice_number, i.invoice_date, COALESCE(SUM(ii.quantity), 0) as qty_per_transaction, i.paid_amount, i.total, COALESCE(NULLIF(sc.name, ''), 'غير محدد') as sales_channel_name, employees.first_name, employees.last_name")
             ->orderByDesc('i.invoice_date')
             ->get()
             ->map(function ($row) {
@@ -2238,7 +2210,6 @@ class AccountingPageController extends Controller
                     'quantity_per_transaction' => (float) $row->qty_per_transaction,
                     'paid_amount' => (float) $row->paid_amount,
                     'received_amount' => (float) $row->total,
-                    'payment_method' => $row->payment_method_name,
                     'sales_channel' => $row->sales_channel_name,
                     'user_name' => $employeeName !== '' ? $employeeName : 'غير محدد',
                     'label' => $row->customer_name,
@@ -2258,7 +2229,6 @@ class AccountingPageController extends Controller
             ['key' => 'quantity_per_transaction', 'label' => 'الكمية لكل عملية', 'format' => 'number'],
             ['key' => 'paid_amount', 'label' => 'المبلغ المدفوع', 'format' => 'currency'],
             ['key' => 'received_amount', 'label' => 'المستلم', 'format' => 'currency'],
-            ['key' => 'payment_method', 'label' => 'طريقة الدفع', 'format' => 'text'],
             ['key' => 'sales_channel', 'label' => 'قناة البيع', 'format' => 'text'],
             ['key' => 'user_name', 'label' => 'المستخدم', 'format' => 'text'],
         ];
@@ -2467,54 +2437,6 @@ class AccountingPageController extends Controller
             ['key' => 'discount', 'label' => 'الخصم', 'format' => 'currency'],
             ['key' => 'sales_tax', 'label' => 'ضريبة المبيعات', 'format' => 'currency'],
             ['key' => 'sales_with_tax', 'label' => 'المبيعات (شامل الضريبة)', 'format' => 'currency'],
-        ];
-
-        return $report;
-    }
-
-    private function salesByPaymentMethodInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
-    {
-        $rows = DB::table('invoices as i')
-            ->leftJoin('payment_methods as pm', 'pm.id', '=', 'i.payment_method_id')
-            ->leftJoin('branches as b', 'b.id', '=', 'i.branch_id')
-            ->leftJoin('employees', 'employees.id', '=', 'i.employee_id')
-            ->where('i.company_id', $company->id)
-            ->whereIn('i.status', ['sent', 'partial', 'paid'])
-            ->whereBetween('i.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
-            ->selectRaw("COALESCE(NULLIF(pm.name, ''), 'غير محدد') as payment_method_name, COALESCE(NULLIF(b.name, ''), 'غير محدد') as branch_name, employees.first_name, employees.last_name, COUNT(i.id) as sale_operations, COALESCE(SUM(i.total), 0) as gross_sales")
-            ->groupBy('payment_method_name', 'branch_name', 'employees.id', 'employees.first_name', 'employees.last_name')
-            ->orderByDesc('gross_sales')
-            ->get()
-            ->map(function ($row) {
-                $employeeName = trim(implode(' ', array_filter([$row->first_name, $row->last_name])));
-
-                return [
-                    'payment_method' => $row->payment_method_name,
-                    'location' => $row->branch_name,
-                    'employee' => $employeeName !== '' ? $employeeName : 'غير محدد',
-                    'sale_operations' => (int) $row->sale_operations,
-                    'gross_sales_total' => (float) $row->gross_sales,
-                    'return_operations' => 0,
-                    'gross_returns_total' => 0,
-                    'total_operations' => (int) $row->sale_operations,
-                    'sales_with_tax' => (float) $row->gross_sales,
-                    'label' => $row->payment_method_name,
-                    'value' => (float) $row->gross_sales,
-                    'format' => 'currency',
-                ];
-            });
-
-        $report = $this->interactiveCollectionReport($rows, 'لا توجد مبيعات مرتبطة بطرق دفع ضمن الفترة المحددة.');
-        $report['columns'] = [
-            ['key' => 'payment_method', 'label' => 'طريقة الدفع', 'format' => 'text'],
-            ['key' => 'location', 'label' => 'الموقع', 'format' => 'text'],
-            ['key' => 'employee', 'label' => 'الموظف', 'format' => 'text'],
-            ['key' => 'sale_operations', 'label' => 'عدد عمليات البيع', 'format' => 'number'],
-            ['key' => 'gross_sales_total', 'label' => 'إجمالي المبيعات (شاملة الضريبة)', 'format' => 'currency'],
-            ['key' => 'return_operations', 'label' => 'عدد عمليات الإرجاع', 'format' => 'number'],
-            ['key' => 'gross_returns_total', 'label' => 'إجمالي المرتجعات (شاملة الضريبة)', 'format' => 'currency'],
-            ['key' => 'total_operations', 'label' => 'إجمالي العمليات', 'format' => 'number'],
-            ['key' => 'sales_with_tax', 'label' => 'المبيعات (شاملة الضريبة)', 'format' => 'currency'],
         ];
 
         return $report;
@@ -2856,19 +2778,6 @@ class AccountingPageController extends Controller
         return view('sales_channels', compact('company', 'salesChannels'));
     }
 
-    public function paymentMethods(Request $request): View
-    {
-        $company = $this->company($request);
-        $paymentMethods = PaymentMethod::query()
-            ->withCount(['invoices', 'payments', 'purchases'])
-            ->where('company_id', $company->id)
-            ->orderByDesc('is_default')
-            ->orderBy('name')
-            ->get();
-
-        return view('payment_methods', compact('company', 'paymentMethods'));
-    }
-
     public function storeSalesChannel(Request $request): RedirectResponse
     {
         $company = $this->company($request);
@@ -2878,17 +2787,6 @@ class AccountingPageController extends Controller
         $this->syncDefaultSalesChannelFlag($salesChannel, (bool) ($validated['is_default'] ?? false));
 
         return redirect()->route('sales_channels.index')->with('success', 'تمت إضافة قناة البيع بنجاح.');
-    }
-
-    public function storePaymentMethod(Request $request): RedirectResponse
-    {
-        $company = $this->company($request);
-        $validated = $this->validatePaymentMethodData($request, $company->id);
-        $paymentMethod = PaymentMethod::query()->create($this->paymentMethodPayload($validated, $company));
-
-        $this->syncDefaultPaymentMethodFlag($paymentMethod, (bool) ($validated['is_default'] ?? false));
-
-        return redirect()->route('payment_methods.index')->with('success', 'تمت إضافة طريقة الدفع بنجاح.');
     }
 
     public function updateSalesChannel(Request $request, SalesChannel $salesChannel): RedirectResponse
@@ -2901,18 +2799,6 @@ class AccountingPageController extends Controller
         $this->syncDefaultSalesChannelFlag($salesChannel, (bool) ($validated['is_default'] ?? false));
 
         return redirect()->route('sales_channels.index')->with('success', 'تم تحديث قناة البيع بنجاح.');
-    }
-
-    public function updatePaymentMethod(Request $request, PaymentMethod $paymentMethod): RedirectResponse
-    {
-        $company = $this->company($request);
-        abort_if((int) $paymentMethod->company_id !== (int) $company->id, 404);
-
-        $validated = $this->validatePaymentMethodData($request, $company->id, $paymentMethod);
-        $paymentMethod->update($this->paymentMethodPayload($validated, $company, $paymentMethod));
-        $this->syncDefaultPaymentMethodFlag($paymentMethod, (bool) ($validated['is_default'] ?? false));
-
-        return redirect()->route('payment_methods.index')->with('success', 'تم تحديث طريقة الدفع بنجاح.');
     }
 
     public function destroySalesChannel(Request $request, SalesChannel $salesChannel): RedirectResponse
@@ -2931,24 +2817,6 @@ class AccountingPageController extends Controller
         $salesChannel->delete();
 
         return redirect()->route('sales_channels.index')->with('success', 'تم حذف قناة البيع بنجاح.');
-    }
-
-    public function destroyPaymentMethod(Request $request, PaymentMethod $paymentMethod): RedirectResponse
-    {
-        $company = $this->company($request);
-        abort_if((int) $paymentMethod->company_id !== (int) $company->id, 404);
-
-        if (PaymentMethod::query()->where('company_id', $company->id)->count() <= 1) {
-            return redirect()->route('payment_methods.index')->with('error', 'يجب أن تبقى طريقة دفع واحدة على الأقل داخل الشركة.');
-        }
-
-        if ($paymentMethod->invoices()->exists() || $paymentMethod->payments()->exists() || $paymentMethod->purchases()->exists()) {
-            return redirect()->route('payment_methods.index')->with('error', 'لا يمكن حذف طريقة دفع مرتبطة بعمليات أو دفعات محفوظة.');
-        }
-
-        $paymentMethod->delete();
-
-        return redirect()->route('payment_methods.index')->with('success', 'تم حذف طريقة الدفع بنجاح.');
     }
 
     public function settings(Request $request): View
@@ -3436,10 +3304,6 @@ class AccountingPageController extends Controller
                 'nullable',
                 Rule::exists('sales_channels', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
             ],
-            'payment_method_id' => [
-                'nullable',
-                Rule::exists('payment_methods', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
-            ],
             'invoice_date' => ['required', 'date'],
             'due_date' => ['nullable', 'date', 'after_or_equal:invoice_date'],
             'status' => ['required', Rule::in(['draft', 'sent'])],
@@ -3482,15 +3346,6 @@ class AccountingPageController extends Controller
 
         if ($requestedPaymentStatus === 'deferred') {
             $validated['paid_amount'] = 0;
-            $validated['payment_method_id'] = null;
-        } else {
-            $validated['payment_method_id'] = $validated['payment_method_id'] ?? $this->defaultPaymentMethodId($companyId);
-
-            if (! $validated['payment_method_id']) {
-                throw ValidationException::withMessages([
-                    'payment_method_id' => 'لا توجد طريقة دفع متاحة لعمليات الدفع الكامل أو الجزئي. أضف طريقة دفع أولاً.',
-                ]);
-            }
         }
 
         if ($requestedPaymentStatus === 'full') {
@@ -3670,24 +3525,6 @@ class AccountingPageController extends Controller
         ]);
     }
 
-    private function validatePaymentMethodData(Request $request, int $companyId, ?PaymentMethod $paymentMethod = null): array
-    {
-        $uniqueCodeRule = Rule::unique('payment_methods', 'code')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
-
-        if ($paymentMethod) {
-            $uniqueCodeRule = $uniqueCodeRule->ignore($paymentMethod->id);
-        }
-
-        return $request->validate([
-            'payment_method_modal' => ['nullable', 'string'],
-            'name' => ['required', 'string', 'max:120'],
-            'code' => ['required', 'string', 'max:40', $uniqueCodeRule],
-            'type' => ['required', Rule::in(['cash', 'bank', 'card', 'wallet', 'other'])],
-            'is_default' => ['nullable', 'boolean'],
-        ]);
-    }
-
     private function validateEmployeeData(Request $request, int $companyId, ?Employee $employee = null): array
     {
         $uniqueEmailRule = Rule::unique('employees', 'email')
@@ -3770,19 +3607,6 @@ class AccountingPageController extends Controller
         ];
     }
 
-    private function paymentMethodPayload(array $validated, Company $company, ?PaymentMethod $paymentMethod = null): array
-    {
-        $defaultMethod = ! $paymentMethod && ! PaymentMethod::query()->where('company_id', $company->id)->exists();
-
-        return [
-            'company_id' => $company->id,
-            'name' => $validated['name'],
-            'code' => mb_strtoupper(trim($validated['code'])),
-            'type' => $validated['type'],
-            'is_default' => (bool) ($validated['is_default'] ?? $defaultMethod),
-        ];
-    }
-
     private function employeePayload(array $validated, Company $company, ?Employee $employee = null): array
     {
         return [
@@ -3852,26 +3676,6 @@ class AccountingPageController extends Controller
         }
     }
 
-    private function syncDefaultPaymentMethodFlag(PaymentMethod $paymentMethod, bool $shouldBeDefault): void
-    {
-        if (! $shouldBeDefault) {
-            if (! PaymentMethod::query()->where('company_id', $paymentMethod->company_id)->where('is_default', true)->exists()) {
-                $paymentMethod->forceFill(['is_default' => true])->save();
-            }
-
-            return;
-        }
-
-        PaymentMethod::query()
-            ->where('company_id', $paymentMethod->company_id)
-            ->where('id', '!=', $paymentMethod->id)
-            ->update(['is_default' => false]);
-
-        if (! $paymentMethod->is_default) {
-            $paymentMethod->forceFill(['is_default' => true])->save();
-        }
-    }
-
     private function validateTaxSettingsData(Request $request, int $companyId): array
     {
         return $request->validate([
@@ -3882,7 +3686,7 @@ class AccountingPageController extends Controller
             ],
             'input_tax_account_id' => [
                 'required',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)->where('account_type', 'asset')),
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
             ],
         ]);
     }
@@ -3898,7 +3702,10 @@ class AccountingPageController extends Controller
             ],
             'payment_account_id' => [
                 'required',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                    ->where('company_id', $companyId)
+                    ->where('allows_direct_transactions', true)
+                    ->where('is_active', true)),
             ],
             'amount' => ['required', 'numeric', 'min:0.01'],
             'tax_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
@@ -3922,6 +3729,7 @@ class AccountingPageController extends Controller
                 Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
             ],
             'description' => ['nullable', 'string'],
+            'allows_direct_transactions' => ['nullable', 'boolean'],
             'is_active' => ['nullable', 'boolean'],
         ]);
     }
@@ -3931,10 +3739,10 @@ class AccountingPageController extends Controller
         $rootCodes = [
             'asset' => '1',
             'liability' => '2',
-            'equity' => '5',
-            'revenue' => '3',
-            'expense' => '4',
-            'cogs' => '4',
+            'equity' => '3',
+            'revenue' => '4',
+            'expense' => '5',
+            'cogs' => '5',
         ];
 
         $accountsByCode = $accounts->keyBy('code');
@@ -4057,10 +3865,10 @@ class AccountingPageController extends Controller
         $rootCodes = [
             'asset' => '1',
             'liability' => '2',
-            'equity' => '5',
-            'revenue' => '3',
-            'expense' => '4',
-            'cogs' => '4',
+            'equity' => '3',
+            'revenue' => '4',
+            'expense' => '5',
+            'cogs' => '5',
         ];
 
         $code = $rootCodes[$type] ?? null;
@@ -4162,10 +3970,6 @@ class AccountingPageController extends Controller
             'status' => ['nullable', Rule::in(['draft', 'pending', 'approved'])],
             'payment_status' => ['required', Rule::in(['pending', 'partial', 'paid'])],
             'paid_amount' => ['nullable', 'numeric', 'min:0'],
-            'payment_method_id' => [
-                'nullable',
-                Rule::exists('payment_methods', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
-            ],
             'payment_date' => ['nullable', 'date', 'after_or_equal:purchase_date'],
             'notes' => ['nullable', 'string'],
             'attachment' => $attachmentRules,
@@ -4190,17 +3994,8 @@ class AccountingPageController extends Controller
         $validated['payment_status'] = $requestedPaymentStatus;
 
         if ($requestedPaymentStatus === 'pending') {
-            $validated['payment_method_id'] = null;
             $validated['payment_date'] = null;
             $validated['paid_amount'] = 0;
-        } else {
-            $validated['payment_method_id'] = $validated['payment_method_id'] ?? $this->defaultPaymentMethodId($companyId);
-
-            if (! $validated['payment_method_id']) {
-                throw ValidationException::withMessages([
-                    'payment_method_id' => 'لا توجد طريقة دفع متاحة للمشتريات المدفوعة أو المدفوعة جزئياً. أضف طريقة دفع أولاً.',
-                ]);
-            }
         }
 
         if ($requestedPaymentStatus === 'paid') {
@@ -4261,27 +4056,6 @@ class AccountingPageController extends Controller
             'company_id' => $companyId,
             'name' => 'المبيعات المباشرة',
             'code' => 'DIRECT',
-            'is_default' => true,
-        ])->id;
-    }
-
-    private function defaultPaymentMethodId(int $companyId): ?int
-    {
-        $paymentMethodId = PaymentMethod::query()
-            ->where('company_id', $companyId)
-            ->orderByDesc('is_default')
-            ->orderBy('id')
-            ->value('id');
-
-        if ($paymentMethodId) {
-            return (int) $paymentMethodId;
-        }
-
-        return (int) PaymentMethod::query()->create([
-            'company_id' => $companyId,
-            'name' => 'غير محدد',
-            'code' => 'UNSPECIFIED',
-            'type' => 'other',
             'is_default' => true,
         ])->id;
     }
@@ -4828,8 +4602,6 @@ class AccountingPageController extends Controller
         $salesChannels = SalesChannel::query()->where('company_id', $company->id)->orderByDesc('is_default')->orderBy('name')->get();
         $defaultTaxRate = 15;
         $defaultSalesChannelId = $this->defaultSalesChannelId($company->id);
-        $defaultPaymentMethodId = $this->defaultPaymentMethodId($company->id);
-        $paymentMethods = PaymentMethod::query()->where('company_id', $company->id)->orderByDesc('is_default')->orderBy('name')->get();
         $salesOwnerContext = $this->invoiceSalesOwnerContext($user, $invoice);
 
         if ($invoice) {
@@ -4841,10 +4613,8 @@ class AccountingPageController extends Controller
             'customers',
             'products',
             'salesChannels',
-            'paymentMethods',
             'defaultTaxRate',
             'defaultSalesChannelId',
-            'defaultPaymentMethodId',
             'salesOwnerContext',
             'invoice'
         ));

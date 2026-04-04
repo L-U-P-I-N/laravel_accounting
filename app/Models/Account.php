@@ -14,6 +14,7 @@ class Account extends Model
         'name_ar',
         'account_type',
         'parent_id',
+        'allows_direct_transactions',
         'is_active',
         'is_system',
         'description',
@@ -22,6 +23,7 @@ class Account extends Model
     ];
 
     protected $casts = [
+        'allows_direct_transactions' => 'boolean',
         'is_active' => 'boolean',
         'is_system' => 'boolean',
         'balance' => 'decimal:2',

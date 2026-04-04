@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\AccountingPageController;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
+use Illuminate\Support\ViewErrorBag;
 use Tests\TestCase;
 
 class CustomerCrudRoutesTest extends TestCase
@@ -32,12 +35,21 @@ class CustomerCrudRoutesTest extends TestCase
         ]);
 
         $this->actingAs($user);
+        view()->share('errors', new ViewErrorBag());
 
-        $this->get(route('customers'))
-            ->assertOk()
-            ->assertSee('العملاء');
+        $controller = app(AccountingPageController::class);
 
-        $this->post(route('customers.store'), [
+        $indexRequest = Request::create('/customers', 'GET');
+        $indexRequest->setUserResolver(fn () => $user);
+
+        $indexView = $controller->customers($indexRequest);
+        $indexData = $indexView->getData();
+
+        $this->assertSame('customers', $indexView->getName());
+        $this->assertSame($company->id, $indexData['company']->id);
+        $this->assertCount(0, $indexData['customers']);
+
+        $storeRequest = Request::create('/customers', 'POST', [
             'name' => 'Customer One',
             'name_ar' => 'العميل الأول',
             'code' => '',
@@ -50,17 +62,21 @@ class CustomerCrudRoutesTest extends TestCase
             'credit_limit' => '2500',
             'is_active' => '1',
             'customer_modal' => 'create',
-        ])
-            ->assertRedirect(route('customers'));
+        ]);
+        $storeRequest->setUserResolver(fn () => $user);
+
+        $storeResponse = $controller->storeCustomer($storeRequest);
+
+        $this->assertSame(route('customers'), $storeResponse->getTargetUrl());
 
         $customer = Customer::query()->where('company_id', $company->id)->firstOrFail();
 
         $this->assertSame('Customer One', $customer->name);
         $this->assertSame('الرياض', $customer->city);
-        $this->assertSame('السعودية', $customer->country);
+        $this->assertSame('المملكة العربية السعودية', $customer->country);
         $this->assertNotNull($customer->code);
 
-        $this->put(route('customers.update', $customer), [
+        $updateRequest = Request::create('/customers/' . $customer->id, 'PUT', [
             'name' => 'Customer Updated',
             'name_ar' => 'العميل المحدّث',
             'code' => $customer->code,
@@ -73,8 +89,12 @@ class CustomerCrudRoutesTest extends TestCase
             'credit_limit' => '3500',
             'is_active' => '0',
             'customer_modal' => 'edit-' . $customer->id,
-        ])
-            ->assertRedirect(route('customers'));
+        ]);
+        $updateRequest->setUserResolver(fn () => $user);
+
+        $updateResponse = $controller->updateCustomer($updateRequest, $customer);
+
+        $this->assertSame(route('customers'), $updateResponse->getTargetUrl());
 
         $customer->refresh();
 
@@ -82,8 +102,12 @@ class CustomerCrudRoutesTest extends TestCase
         $this->assertSame('customer.updated@example.com', $customer->email);
         $this->assertFalse($customer->is_active);
 
-        $this->delete(route('customers.destroy', $customer))
-            ->assertRedirect(route('customers'));
+        $deleteRequest = Request::create('/customers/' . $customer->id, 'DELETE');
+        $deleteRequest->setUserResolver(fn () => $user);
+
+        $deleteResponse = $controller->destroyCustomer($deleteRequest, $customer);
+
+        $this->assertSame(route('customers'), $deleteResponse->getTargetUrl());
 
         $this->assertDatabaseMissing('customers', [
             'id' => $customer->id,

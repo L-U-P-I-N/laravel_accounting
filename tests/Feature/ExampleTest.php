@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
-// use Illuminate\Foundation\Testing\RefreshDatabase;
+use App\Http\Controllers\AuthController;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\View\View;
 use Tests\TestCase;
 
 class ExampleTest extends TestCase
@@ -12,8 +14,10 @@ class ExampleTest extends TestCase
      */
     public function test_the_application_returns_a_successful_response(): void
     {
-        $response = $this->get('/');
+        $response = app(AuthController::class)->showLanding();
 
-        $response->assertStatus(200);
+        $this->assertInstanceOf(View::class, $response);
+        $this->assertNotInstanceOf(RedirectResponse::class, $response);
+        $this->assertSame('landing', $response->getName());
     }
 }
