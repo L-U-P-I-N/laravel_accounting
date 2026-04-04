@@ -10,11 +10,74 @@ use App\Models\JournalLine;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Http\RedirectResponse;
 use Tests\TestCase;
 
 class JournalEntriesPageTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_manual_journal_entry_returns_specific_message_when_lines_are_not_balanced(): void
+    {
+        $this->withoutMiddleware();
+
+        $company = Company::create([
+            'name' => 'Ledger Co',
+            'country_code' => 'SA',
+            'currency' => 'SAR',
+        ]);
+
+        $user = User::factory()->create([
+            'first_name' => 'Owner',
+            'last_name' => 'User',
+            'name' => 'Owner User',
+            'role' => 'owner',
+            'company_id' => $company->id,
+            'must_change_password' => false,
+            'is_active' => true,
+        ]);
+
+        $cashAccount = Account::create([
+            'company_id' => $company->id,
+            'code' => '1101',
+            'name' => 'Cash',
+            'name_ar' => 'الصندوق',
+            'account_type' => 'asset',
+            'is_active' => true,
+            'is_system' => false,
+            'balance' => 0,
+        ]);
+
+        $expenseAccount = Account::create([
+            'company_id' => $company->id,
+            'code' => '6100',
+            'name' => 'Expense',
+            'name_ar' => 'مصروف',
+            'account_type' => 'expense',
+            'is_active' => true,
+            'is_system' => false,
+            'balance' => 0,
+        ]);
+
+        $request = Request::create('/journal-entries', 'POST', [
+            'entry_date' => '2026-04-04',
+            'reference' => 'REF-BAD-1',
+            'description' => 'Unbalanced manual entry',
+            'line_account' => [$cashAccount->id, $expenseAccount->id],
+            'line_description' => ['Cash line', 'Expense line'],
+            'line_debit' => [100, 0],
+            'line_credit' => [0, 90],
+        ]);
+        $request->headers->set('referer', '/journal-entries/create');
+        $request->setUserResolver(fn () => $user);
+        $request->setLaravelSession($this->app['session.store']);
+
+        $response = app(AccountingPageController::class)->storeJournalEntry($request);
+
+        $this->assertInstanceOf(RedirectResponse::class, $response);
+        $this->assertSame('القيد المحاسبي غير متوازن.', $this->app['session.store']->get('error'));
+        $this->assertDatabaseCount('journal_entries', 0);
+    }
 
     public function test_journal_entries_page_filters_by_account_and_date_range(): void
     {

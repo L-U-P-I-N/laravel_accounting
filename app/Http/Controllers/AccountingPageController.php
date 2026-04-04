@@ -1426,6 +1426,13 @@ class AccountingPageController extends Controller
                     'lines' => $lines,
                 ]);
             });
+        } catch (\RuntimeException $exception) {
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', $exception->getMessage() !== ''
+                    ? $exception->getMessage()
+                    : 'تعذر إنشاء القيد المحاسبي حالياً. تحقق من الحسابات المختارة ثم أعد المحاولة.');
         } catch (\Throwable $exception) {
             report($exception);
 
