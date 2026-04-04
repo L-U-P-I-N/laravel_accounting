@@ -1411,20 +1411,29 @@ class AccountingPageController extends Controller
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        $entry = DB::transaction(function () use ($company, $validated, $lines, $user) {
-            $reference = trim((string) ($validated['reference'] ?? ''));
+        try {
+            $entry = DB::transaction(function () use ($company, $validated, $lines, $user) {
+                $reference = trim((string) ($validated['reference'] ?? ''));
 
-            if ($reference === '') {
-                $reference = $this->referenceGenerator->nextJournalReference($company->id);
-            }
+                if ($reference === '') {
+                    $reference = $this->referenceGenerator->nextJournalReference($company->id);
+                }
 
-            return $this->accountingService->createManualJournalEntry($company->id, $user, [
-                'entry_date' => $validated['entry_date'],
-                'reference' => $reference,
-                'description' => $validated['description'],
-                'lines' => $lines,
-            ]);
-        });
+                return $this->accountingService->createManualJournalEntry($company->id, $user, [
+                    'entry_date' => $validated['entry_date'],
+                    'reference' => $reference,
+                    'description' => $validated['description'],
+                    'lines' => $lines,
+                ]);
+            });
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', 'تعذر إنشاء القيد المحاسبي حالياً. تحقق من الحسابات المختارة ثم أعد المحاولة.');
+        }
 
         return redirect()->route('journal_entries.show', $entry)->with('status', 'تم إنشاء القيد اليدوي وترحيله بنجاح.');
     }

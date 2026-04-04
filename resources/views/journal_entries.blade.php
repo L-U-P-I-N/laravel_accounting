@@ -3,6 +3,14 @@
 @section('title', 'القيود المحاسبية')
 
 @php
+    $filters = array_merge([
+        'search' => '',
+        'status' => '',
+        'account_id' => null,
+        'date_from' => '',
+        'date_to' => '',
+        'sort_direction' => 'desc',
+    ], $filters ?? []);
     $canManageJournalEntries = auth()->user()->hasPermission('manage_journal_entries');
     $canViewReports = auth()->user()->hasPermission('view_reports');
     $journalReportParams = array_filter([
