@@ -234,6 +234,13 @@
 
                     <label class="form-label">مبلغ الدفع</label>
                     <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $supplier->balance, 2, '.', '') }}" step="0.01" value="{{ old('payment_amount') }}" required>
+                    <label class="form-label mt-3">حساب السداد</label>
+                    <select name="payment_account_id" class="form-select" required>
+                        <option value="">اختر الحساب</option>
+                        @foreach ($paymentAccounts as $account)
+                            <option value="{{ $account->id }}" {{ (string) old('payment_account_id') === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>
+                        @endforeach
+                    </select>
                     <label class="form-label mt-3">المرجع</label>
                     <input type="text" name="payment_reference" class="form-control" value="{{ old('payment_reference', $suggestedPaymentReference) }}">
                     <label class="form-label mt-3">حالة الدفع</label>

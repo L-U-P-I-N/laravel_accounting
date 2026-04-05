@@ -1,6 +1,6 @@
 @php
     $canManageAccounts = $canManageAccounts ?? auth()->user()->hasPermission('manage_accounts');
-    $typeText = match ($account->account_type) {
+    $typeText = $account->display_account_type ?: match ($account->account_type) {
         'asset' => 'أصول',
         'liability' => 'خصوم',
         'equity' => 'ملكية',
@@ -277,7 +277,7 @@
                 </div>
 
                 <div class="coa-node-kind">
-                    <span class="coa-label">التصنيف</span>
+                    <span class="coa-label">النوع</span>
                     <span class="coa-value">{{ $typeText }}</span>
                 </div>
 

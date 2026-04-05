@@ -59,7 +59,7 @@ Artisan::command('app:seed-demo-if-empty', function () {
         $accounting->resyncCompanyTransactions($company, $user);
 
         Invoice::query()
-            ->with(['items.product', 'customer', 'paymentMethod'])
+            ->with(['items.product', 'customer', 'paymentAccount'])
             ->where('company_id', $company->id)
             ->get()
             ->each(function (Invoice $invoice) use ($paymentSync, $inventorySync) {
@@ -76,7 +76,7 @@ Artisan::command('app:seed-demo-if-empty', function () {
             });
 
         Purchase::query()
-            ->with(['items.product', 'supplier', 'paymentMethod'])
+            ->with(['items.product', 'supplier', 'paymentAccount'])
             ->where('company_id', $company->id)
             ->get()
             ->each(function (Purchase $purchase) use ($paymentSync, $inventorySync) {

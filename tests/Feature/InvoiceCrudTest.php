@@ -13,6 +13,7 @@ use App\Models\JournalEntry;
 use App\Models\Product;
 use App\Models\TaxSetting;
 use App\Models\User;
+use App\Support\ChartOfAccountsSynchronizer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -281,6 +282,7 @@ class InvoiceCrudTest extends TestCase
             'due_date' => '2026-04-27',
             'status' => 'sent',
             'payment_status' => 'partial',
+            'payment_account_id' => $this->paymentAccountId($company),
             'paid_amount' => 20,
             'item_product_id' => [$product->id],
             'item_description' => ['Partial product'],
@@ -314,6 +316,7 @@ class InvoiceCrudTest extends TestCase
             'due_date' => '2026-04-27',
             'status' => 'sent',
             'payment_status' => 'full',
+            'payment_account_id' => $this->paymentAccountId($company),
             'paid_amount' => 1,
             'item_product_id' => [$product->id],
             'item_description' => ['Paid product'],
@@ -501,5 +504,15 @@ class InvoiceCrudTest extends TestCase
         ]);
 
         return [$company, $user, $customer, $product, $employee, $branch];
+    }
+
+    private function paymentAccountId(Company $company): int
+    {
+        app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+
+        return (int) Account::query()
+            ->where('company_id', $company->id)
+            ->where('code', '110201')
+            ->value('id');
     }
 }

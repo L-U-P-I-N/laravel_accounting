@@ -14,8 +14,7 @@ return new class extends Migration
         Schema::table('purchases', function (Blueprint $table) {
             $table->string('supplier_invoice_number', 100)->nullable()->after('purchase_number');
             $table->string('attachment_path')->nullable()->after('supplier_invoice_number');
-            $table->string('payment_method', 50)->nullable()->after('payment_status');
-            $table->date('payment_date')->nullable()->after('payment_method');
+            $table->date('payment_date')->nullable()->after('payment_status');
         });
     }
 
@@ -28,7 +27,6 @@ return new class extends Migration
             $table->dropColumn([
                 'supplier_invoice_number',
                 'attachment_path',
-                'payment_method',
                 'payment_date',
             ]);
         });

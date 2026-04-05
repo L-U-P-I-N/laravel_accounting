@@ -78,6 +78,8 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:manage_accounts')->group(function () {
         Route::get('/chart-of-accounts', [AccountingPageController::class, 'chartOfAccounts'])->name('chart_of_accounts');
+        Route::get('/chart-of-accounts/print', [AccountingPageController::class, 'printChartOfAccounts'])->name('chart_of_accounts.print');
+        Route::get('/chart-of-accounts/export', [AccountingPageController::class, 'exportChartOfAccounts'])->name('chart_of_accounts.export');
         Route::get('/chart-of-accounts/{account}', [AccountingPageController::class, 'showAccount'])->name('chart_of_accounts.show');
         Route::post('/chart-of-accounts', [AccountingPageController::class, 'storeAccount'])->name('chart_of_accounts.store');
         Route::post('/chart-of-accounts/resync', [AccountingPageController::class, 'resyncCompanyAccounting'])->name('chart_of_accounts.resync');

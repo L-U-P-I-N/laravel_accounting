@@ -13,6 +13,7 @@ class Account extends Model
         'name',
         'name_ar',
         'account_type',
+        'display_account_type',
         'parent_id',
         'allows_direct_transactions',
         'is_active',

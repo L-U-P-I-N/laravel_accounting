@@ -47,7 +47,7 @@ return new class extends Migration
 
         if (Schema::hasTable('payments') && ! Schema::hasColumn('payments', 'journal_entry_id')) {
             Schema::table('payments', function (Blueprint $table) {
-                $table->foreignId('journal_entry_id')->nullable()->after('payment_method_id')->constrained('journal_entries')->nullOnDelete();
+                $table->foreignId('journal_entry_id')->nullable()->after('customer_id')->constrained('journal_entries')->nullOnDelete();
             });
         }
 
@@ -197,7 +197,6 @@ return new class extends Migration
                 'p.id',
                 'p.company_id',
                 'p.supplier_id',
-                'p.payment_method_id',
                 'p.purchase_number',
                 'p.purchase_date',
                 'p.payment_date',
@@ -212,7 +211,6 @@ return new class extends Migration
                 'purchase_id' => $row->id,
                 'customer_id' => null,
                 'supplier_id' => $row->supplier_id,
-                'payment_method_id' => $row->payment_method_id,
                 'journal_entry_id' => null,
                 'amount' => $row->paid_amount,
                 'payment_direction' => 'out',
@@ -257,7 +255,6 @@ return new class extends Migration
                 'purchase_id' => null,
                 'customer_id' => null,
                 'supplier_id' => $row->supplier_id,
-                'payment_method_id' => null,
                 'journal_entry_id' => $row->id,
                 'amount' => $row->total_credit,
                 'payment_direction' => 'out',

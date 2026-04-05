@@ -15,6 +15,15 @@
         'cogs' => 'تكلفة مباعة',
     ];
     $accountsReportUrl = route('reports', ['report_type' => 'account_balances']);
+    $chartAccountQuery = array_filter([
+        'search' => $accountFilters['search'] ?? '',
+        'account_type' => $accountFilters['account_type'] ?? '',
+        'min_balance' => $accountFilters['min_balance'] ?? '',
+        'max_balance' => $accountFilters['max_balance'] ?? '',
+        'include_dynamic' => $includeDynamicAccounts ? 1 : null,
+    ], fn ($value) => $value !== '' && $value !== null);
+    $printChartUrl = route('chart_of_accounts.print', $chartAccountQuery);
+    $exportChartUrl = route('chart_of_accounts.export', $chartAccountQuery);
 @endphp
 
 @push('styles')
@@ -353,6 +362,12 @@
                             <i class="fas fa-chart-column ms-1"></i> مركز التقارير
                         </a>
                     @endif
+                    <a href="{{ $printChartUrl }}" class="btn btn-outline-dark" target="_blank" rel="noopener">
+                        <i class="fas fa-print ms-1"></i> طباعة الشجرة
+                    </a>
+                    <a href="{{ $exportChartUrl }}" class="btn btn-outline-success">
+                        <i class="fas fa-file-csv ms-1"></i> تصدير Excel
+                    </a>
                     @if ($canManageAccounts)
                         <form method="POST" action="{{ route('chart_of_accounts.resync') }}">
                             @csrf
@@ -423,6 +438,12 @@
                 <label class="form-label">أعلى رصيد</label>
                 <input type="number" step="0.01" name="max_balance" class="form-control" value="{{ $accountFilters['max_balance'] ?? '' }}" placeholder="0.00">
             </div>
+            <div class="col-lg-2 col-md-6 d-flex align-items-end">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" name="include_dynamic" value="1" id="includeDynamicAccounts" @checked($includeDynamicAccounts)>
+                    <label class="form-check-label" for="includeDynamicAccounts">عرض الحسابات الديناميكية</label>
+                </div>
+            </div>
             <div class="col-lg-1 col-md-12 d-flex align-items-end">
                 <button type="submit" class="btn btn-primary w-100">
                     <i class="fas fa-filter ms-1"></i> فلترة
@@ -454,6 +475,10 @@
         @if ($hasAccountFilters)
             <div class="alert alert-info">
                 تم تطبيق الفلاتر على الشجرة، لذلك يتم إظهار الحسابات المطابقة مع آبائها للحفاظ على التسلسل المحاسبي واضحًا.
+            </div>
+        @elseif (! $includeDynamicAccounts)
+            <div class="alert alert-light border">
+                يتم إخفاء الحسابات الديناميكية الخاصة بالعملاء والموردين والمنتجات من العرض الأساسي. فعّل خيار "عرض الحسابات الديناميكية" إذا أردت ظهورها داخل الشجرة.
             </div>
         @endif
 

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Http\Controllers\AccountingPageController;
 use App\Models\Account;
 use App\Models\Company;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\Supplier;
@@ -32,7 +33,6 @@ class PurchaseTaxAmountTest extends TestCase
             'due_date' => '2026-04-27',
             'status' => 'draft',
             'payment_status' => 'pending',
-            'payment_method' => 'cash',
             'supplier_invoice_number' => 'SUP-INV-001',
             'payment_date' => '2026-03-27',
             'item_product_id' => [$product->id],
@@ -73,7 +73,6 @@ class PurchaseTaxAmountTest extends TestCase
             'due_date' => '2026-04-27',
             'status' => 'draft',
             'payment_status' => 'pending',
-            'payment_method' => 'cash',
             'supplier_invoice_number' => 'SUP-INV-001',
             'payment_date' => '2026-03-27',
             'item_product_id' => [$product->id],
@@ -95,7 +94,6 @@ class PurchaseTaxAmountTest extends TestCase
             'due_date' => '2026-04-30',
             'status' => 'approved',
             'payment_status' => 'pending',
-            'payment_method' => 'cash',
             'supplier_invoice_number' => 'SUP-INV-001',
             'payment_date' => '2026-03-29',
             'item_product_id' => [$product->id],
@@ -137,6 +135,7 @@ class PurchaseTaxAmountTest extends TestCase
             'due_date' => '2026-04-27',
             'status' => 'draft',
             'payment_status' => 'partial',
+            'payment_account_id' => $this->paymentAccountId($company),
             'paid_amount' => 50,
             'payment_date' => '2026-03-27',
             'supplier_invoice_number' => 'SUP-INV-PAID-001',
@@ -156,8 +155,13 @@ class PurchaseTaxAmountTest extends TestCase
         $this->assertSame('partial', $purchase->payment_status);
         $this->assertSame(50.0, (float) $purchase->paid_amount);
         $this->assertSame(180.0, (float) $purchase->balance_due);
-        $this->assertNull($purchase->payment_method_id);
+        $this->assertDatabaseMissing('purchases', ['id' => $purchase->id, 'payment_account_id' => null]);
+        $this->assertSame($this->paymentAccountId($company), $purchase->payment_account_id);
         $this->assertSame('2026-03-27', optional($purchase->payment_date)?->toDateString());
+
+        $payment = Payment::query()->where('purchase_id', $purchase->id)->where('payment_category', 'purchase_payment')->first();
+        $this->assertNotNull($payment);
+        $this->assertSame($this->paymentAccountId($company), $payment->payment_account_id);
 
         $updateRequest = Request::create('/purchases/' . $purchase->id, 'PUT', [
             'supplier_id' => $supplier->id,
@@ -165,6 +169,7 @@ class PurchaseTaxAmountTest extends TestCase
             'due_date' => '2026-04-30',
             'status' => 'approved',
             'payment_status' => 'paid',
+            'payment_account_id' => $this->paymentAccountId($company),
             'paid_amount' => 999,
             'payment_date' => '2026-03-28',
             'supplier_invoice_number' => 'SUP-INV-PAID-001',
@@ -183,7 +188,8 @@ class PurchaseTaxAmountTest extends TestCase
         $this->assertSame('paid', $purchase->payment_status);
         $this->assertSame(230.0, (float) $purchase->paid_amount);
         $this->assertSame(0.0, (float) $purchase->balance_due);
-        $this->assertNull($purchase->payment_method_id);
+        $this->assertDatabaseMissing('purchases', ['id' => $purchase->id, 'payment_account_id' => null]);
+        $this->assertSame($this->paymentAccountId($company), $purchase->payment_account_id);
         $this->assertSame('2026-03-28', optional($purchase->payment_date)?->toDateString());
     }
 
@@ -219,7 +225,6 @@ class PurchaseTaxAmountTest extends TestCase
             'due_date' => '2026-04-27',
             'status' => 'approved',
             'payment_status' => 'pending',
-            'payment_method' => 'cash',
             'supplier_invoice_number' => 'SUP-INV-001',
             'payment_date' => '2026-03-27',
             'item_product_id' => [$product->id],
@@ -281,6 +286,16 @@ class PurchaseTaxAmountTest extends TestCase
             'is_active' => true,
         ]);
 
+        app(\App\Support\ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+
         return [$company, $user, $supplier, $product];
+    }
+
+    private function paymentAccountId(Company $company): int
+    {
+        return (int) Account::query()
+            ->where('company_id', $company->id)
+            ->where('code', '110201')
+            ->value('id');
     }
 }

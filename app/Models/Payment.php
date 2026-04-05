@@ -16,7 +16,7 @@ class Payment extends Model
         'purchase_id',
         'customer_id',
         'supplier_id',
-        'payment_method_id',
+        'payment_account_id',
         'journal_entry_id',
         'amount',
         'payment_direction',
@@ -56,9 +56,9 @@ class Payment extends Model
         return $this->belongsTo(Purchase::class);
     }
 
-    public function paymentMethod(): BelongsTo
+    public function paymentAccount(): BelongsTo
     {
-        return $this->belongsTo(PaymentMethod::class);
+        return $this->belongsTo(Account::class, 'payment_account_id');
     }
 
     public function journalEntry(): BelongsTo

@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Account;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\Purchase;
@@ -91,6 +92,14 @@ class DemoPurchaseInventorySeeder extends Seeder
 
     private function seedPurchases(Company $company, Collection $suppliers, Collection $products): void
     {
+        $paymentAccounts = Account::query()
+            ->where('company_id', $company->id)
+            ->where('allows_direct_transactions', true)
+            ->where('is_active', true)
+            ->orderBy('code')
+            ->get()
+            ->values();
+
         $productMixes = [
             ['HW-WS-01', 'NW-AP-04'],
             ['HW-LT-02', 'NW-BC-05'],
@@ -106,6 +115,8 @@ class DemoPurchaseInventorySeeder extends Seeder
         foreach (range(1, 28) as $index) {
             $purchaseDate = $startDate->copy()->addDays((int) floor($index * 4.6));
             $supplier = $suppliers->get(($index - 1) % $suppliers->count());
+            $paymentAccount = $paymentAccounts->get(($index - 1) % max($paymentAccounts->count(), 1))
+                ?? $paymentAccounts->first();
             $mix = $productMixes[($index - 1) % count($productMixes)];
             $priceFactor = 1 + (((($index - 1) % 5) - 2) * 0.025);
             $subtotal = 0;
@@ -176,9 +187,9 @@ class DemoPurchaseInventorySeeder extends Seeder
                 'total' => $total,
                 'paid_amount' => $paidAmount,
                 'balance_due' => $balanceDue,
+                'payment_account_id' => $paidAmount > 0 ? $paymentAccount?->id : null,
                 'status' => $status,
                 'payment_status' => $paymentStatus,
-                'payment_method' => $paymentStatus === 'pending' ? 'payables' : ['bank_transfer', 'cash', 'credit_card'][($index - 1) % 3],
                 'payment_date' => $paymentStatus === 'pending' ? null : $purchaseDate->copy()->addDays(6)->toDateString(),
                 'notes' => self::NOTE_MARKER . ' مشتريات تجريبية لملء تقارير المخزون والوارد والذمم الدائنة.',
                 'terms' => 'سداد خلال 30 يوماً من تاريخ أمر الشراء.',

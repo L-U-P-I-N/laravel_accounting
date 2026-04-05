@@ -127,7 +127,7 @@ class AccountingPageController extends Controller
                 'company_id' => $company->id,
                 'branch_id' => $salesContext['branch_id'],
                 'sales_channel_id' => $validated['sales_channel_id'],
-                'payment_method_id' => null,
+                'payment_account_id' => $validated['payment_account_id'] ?? null,
                 'invoice_date' => $validated['invoice_date'],
                 'due_date' => $validated['due_date'] ?? null,
                 'subtotal' => $totals['subtotal'],
@@ -146,7 +146,7 @@ class AccountingPageController extends Controller
 
             $this->syncInvoiceItems($invoice, $validated);
 
-            $freshInvoice = $invoice->fresh(['items.product', 'customer']);
+            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentAccount']);
             $journalEntry = null;
 
             if (($validated['status'] ?? 'sent') !== 'draft') {
@@ -202,7 +202,7 @@ class AccountingPageController extends Controller
                 'due_date' => $validated['due_date'] ?? null,
                 'branch_id' => $salesContext['branch_id'],
                 'sales_channel_id' => $validated['sales_channel_id'],
-                'payment_method_id' => null,
+                'payment_account_id' => $validated['payment_account_id'] ?? null,
                 'subtotal' => $totals['subtotal'],
                 'tax_amount' => $totals['tax_amount'],
                 'total' => $totals['total'],
@@ -219,7 +219,7 @@ class AccountingPageController extends Controller
 
             $this->syncInvoiceItems($invoice, $validated);
 
-            $freshInvoice = $invoice->fresh(['items.product', 'customer']);
+            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentAccount']);
             $journalEntry = null;
 
             if ($this->shouldConsumeInvoiceStock($nextStatus)) {
@@ -323,7 +323,7 @@ class AccountingPageController extends Controller
             $this->consumeInvoiceStock($company->id, $stockRequirements);
 
             $invoice->update(['status' => 'sent']);
-            $freshInvoice = $invoice->fresh(['items.product', 'customer']);
+            $freshInvoice = $invoice->fresh(['items.product', 'customer', 'paymentAccount']);
             $journalEntry = $this->accountingService->syncInvoiceEntry($freshInvoice, $user);
             $this->inventoryMovementService->syncInvoice($freshInvoice);
             $this->paymentSyncService->syncInvoicePayment($freshInvoice, $journalEntry);
@@ -359,6 +359,7 @@ class AccountingPageController extends Controller
 
         $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get();
         $products = Product::forCompany($company->id)->active()->orderBy('name')->get();
+        $paymentAccounts = $this->directPaymentAccounts($company->id);
         $pendingPurchasesCount = $purchases->where('status', 'pending')->count();
         $paidPurchasesCount = $purchases->whereIn('status', ['approved', 'paid'])->count();
 
@@ -367,6 +368,7 @@ class AccountingPageController extends Controller
             'purchases' => $purchases,
             'suppliers' => $suppliers,
             'products' => $products,
+            'paymentAccounts' => $paymentAccounts,
             'statusFilter' => $statusFilter,
             'supplierFilter' => $supplierFilter,
             'dateFrom' => $dateFrom,
@@ -407,8 +409,7 @@ class AccountingPageController extends Controller
                 'balance_due' => $paymentData['balance_due'],
                 'status' => $validated['status'] ?? 'draft',
                 'payment_status' => $paymentStatus,
-                'payment_method_id' => null,
-                'payment_method' => null,
+                'payment_account_id' => $validated['payment_account_id'] ?? null,
                 'payment_date' => $paymentDate,
                 'notes' => $validated['notes'] ?? null,
                 'currency' => $company->currency,
@@ -421,7 +422,7 @@ class AccountingPageController extends Controller
                 $this->applyPurchaseStock($company->id, $this->purchaseStockRequirementsFromValidated($validated));
             }
 
-            $freshPurchase = $purchase->fresh(['items.product', 'supplier']);
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentAccount']);
             $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
             $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
 
@@ -479,8 +480,7 @@ class AccountingPageController extends Controller
                 'balance_due' => $paymentData['balance_due'],
                 'status' => $validated['status'] ?? $purchase->status,
                 'payment_status' => $paymentStatus,
-                'payment_method_id' => null,
-                'payment_method' => null,
+                'payment_account_id' => $validated['payment_account_id'] ?? null,
                 'payment_date' => $paymentDate,
                 'notes' => $validated['notes'] ?? null,
                 'currency' => $company->currency,
@@ -492,7 +492,7 @@ class AccountingPageController extends Controller
                 $this->applyPurchaseStock($company->id, $this->purchaseStockRequirementsFromValidated($validated));
             }
 
-            $freshPurchase = $purchase->fresh(['items.product', 'supplier']);
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentAccount']);
             $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
             $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
 
@@ -529,7 +529,7 @@ class AccountingPageController extends Controller
                 'status' => 'approved',
             ]);
 
-            $freshPurchase = $purchase->fresh(['items.product', 'supplier']);
+            $freshPurchase = $purchase->fresh(['items.product', 'supplier', 'paymentAccount']);
             $journalEntry = $this->accountingService->syncPurchaseEntry($freshPurchase, $user);
             $this->paymentSyncService->syncPurchasePayment($freshPurchase, $journalEntry);
             $this->inventoryMovementService->syncPurchase($freshPurchase);
@@ -554,6 +554,13 @@ class AccountingPageController extends Controller
         $validated = $request->validate([
             'purchase_modal' => ['nullable', 'string'],
             'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max((float) $purchase->balance_due, 0.01)],
+            'payment_account_id' => [
+                'required',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                    ->where('company_id', $company->id)
+                    ->where('allows_direct_transactions', true)
+                    ->where('is_active', true)),
+            ],
             'payment_date' => ['required', 'date'],
             'payment_reference' => ['nullable', 'string', 'max:100'],
             'payment_notes' => ['nullable', 'string', 'max:1000'],
@@ -579,6 +586,12 @@ class AccountingPageController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            $paymentAccount = Account::query()
+                ->where('company_id', $lockedPurchase->company_id)
+                ->where('allows_direct_transactions', true)
+                ->where('is_active', true)
+                ->findOrFail($validated['payment_account_id']);
+
             $appliedAmount = min($paymentAmount, round((float) $lockedPurchase->balance_due, 2));
             $updatedPaidAmount = round((float) $lockedPurchase->paid_amount + $appliedAmount, 2);
             $updatedBalance = round(max((float) $lockedPurchase->total - $updatedPaidAmount, 0), 2);
@@ -588,8 +601,7 @@ class AccountingPageController extends Controller
                 'balance_due' => $updatedBalance,
                 'payment_status' => $this->purchasePaymentStatus($updatedPaidAmount, (float) $lockedPurchase->total),
                 'status' => $this->purchaseStatusAfterPayment((string) $lockedPurchase->status, $updatedPaidAmount, $updatedBalance),
-                'payment_method_id' => null,
-                'payment_method' => null,
+                'payment_account_id' => (int) $paymentAccount->id,
                 'payment_date' => $paymentDate,
             ]);
 
@@ -598,6 +610,8 @@ class AccountingPageController extends Controller
                 $appliedAmount,
                 $user,
                 $paymentReference,
+                $paymentAccount,
+                $paymentDate,
             );
 
             $this->paymentSyncService->recordPurchasePayment(
@@ -606,7 +620,7 @@ class AccountingPageController extends Controller
                 paymentDate: $paymentDate,
                 reference: $paymentReference,
                 entry: $journalEntry,
-                paymentMethodId: null,
+                paymentAccountId: (int) $paymentAccount->id,
                 notes: trim((string) ($validated['payment_notes'] ?? '')) ?: null,
             );
         });
@@ -830,8 +844,9 @@ class AccountingPageController extends Controller
         $supplier->purchases_total = (float) $supplier->purchases->sum('total');
 
         $suggestedPaymentReference = $this->referenceGenerator->nextSupplierPaymentReference($company->id);
+        $paymentAccounts = $this->directPaymentAccounts($company->id);
 
-        return view('supplier_show', compact('company', 'supplier', 'suggestedPaymentReference', 'companyCountry', 'sortDirection'));
+        return view('supplier_show', compact('company', 'supplier', 'suggestedPaymentReference', 'companyCountry', 'sortDirection', 'paymentAccounts'));
     }
 
     public function storeSupplier(Request $request): RedirectResponse
@@ -891,6 +906,13 @@ class AccountingPageController extends Controller
         $validated = $request->validate([
             'supplier_action' => ['nullable', 'string'],
             'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max($outstandingBalance, 0.01)],
+            'payment_account_id' => [
+                'required',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                    ->where('company_id', $company->id)
+                    ->where('allows_direct_transactions', true)
+                    ->where('is_active', true)),
+            ],
             'payment_reference' => ['nullable', 'string', 'max:100'],
         ], [
             'payment_amount.max' => 'مبلغ الدفع أكبر من الرصيد المستحق على المورد.',
@@ -910,8 +932,13 @@ class AccountingPageController extends Controller
             $paymentReference = $this->referenceGenerator->nextSupplierPaymentReference($company->id);
         }
 
-        DB::transaction(function () use ($supplier, $paymentAmount, $user, $paymentReference) {
+        DB::transaction(function () use ($supplier, $paymentAmount, $user, $paymentReference, $validated) {
             $remainingAmount = $paymentAmount;
+            $paymentAccount = Account::query()
+                ->where('company_id', $supplier->company_id)
+                ->where('allows_direct_transactions', true)
+                ->where('is_active', true)
+                ->findOrFail($validated['payment_account_id']);
 
             $openPurchases = Purchase::where('company_id', $supplier->company_id)
                 ->where('supplier_id', $supplier->id)
@@ -941,14 +968,14 @@ class AccountingPageController extends Controller
                 $remainingAmount = round($remainingAmount - $appliedAmount, 2);
             }
 
-            $journalEntry = $this->accountingService->createSupplierPaymentEntry($supplier, $paymentAmount, $user, $paymentReference);
+            $journalEntry = $this->accountingService->createSupplierPaymentEntry($supplier, $paymentAmount, $user, $paymentReference, $paymentAccount);
             $this->paymentSyncService->recordSupplierPayment(
                 supplier: $supplier,
                 amount: $paymentAmount,
                 paymentDate: now()->toDateString(),
                 reference: $paymentReference,
                 entry: $journalEntry,
-                paymentMethodId: null,
+                paymentAccountId: (int) $paymentAccount->id,
             );
         });
 
@@ -1197,28 +1224,25 @@ class AccountingPageController extends Controller
             ->orderBy('code')
             ->get();
 
-        $accountFilters = [
-            'search' => trim($request->string('search')->toString()),
-            'account_type' => $request->string('account_type')->toString(),
-            'min_balance' => $request->string('min_balance')->toString(),
-            'max_balance' => $request->string('max_balance')->toString(),
-        ];
+        $includeDynamicAccounts = $request->boolean('include_dynamic');
+        $visibleAccounts = $this->visibleChartAccounts($allAccounts, $includeDynamicAccounts);
+        $accountFilters = $this->chartAccountFilters($request);
 
         $hasAccountFilters = $this->hasAccountFilters($accountFilters);
-        $matchingAccounts = $this->filterAccounts($allAccounts, $accountFilters);
+        $matchingAccounts = $this->filterAccounts($visibleAccounts, $accountFilters);
         $accounts = $hasAccountFilters
-            ? $this->buildFilteredAccountTree($allAccounts, $matchingAccounts)
-            : $this->buildAccountTree($allAccounts);
-        $accountStats = $hasAccountFilters ? $matchingAccounts : $allAccounts;
+            ? $this->buildFilteredAccountTree($visibleAccounts, $matchingAccounts)
+            : $this->buildAccountTree($visibleAccounts);
+        $accountStats = $hasAccountFilters ? $matchingAccounts : $visibleAccounts;
 
-        $parentOptions = $allAccounts->map(fn (Account $account) => [
+        $parentOptions = $visibleAccounts->map(fn (Account $account) => [
             'id' => $account->id,
             'code' => $account->code,
             'label' => $account->code . ' - ' . $account->full_name,
             'type' => $account->account_type,
         ])->values();
 
-        $suggestedParentIds = $this->suggestedParentIds($allAccounts);
+        $suggestedParentIds = $this->suggestedParentIds($visibleAccounts);
 
         return view('chart_of_accounts', compact(
             'company',
@@ -1228,8 +1252,67 @@ class AccountingPageController extends Controller
             'hasAccountFilters',
             'matchingAccounts',
             'parentOptions',
-            'suggestedParentIds'
+            'suggestedParentIds',
+            'includeDynamicAccounts'
         ));
+    }
+
+    public function printChartOfAccounts(Request $request): View
+    {
+        $company = $this->company($request);
+        $allAccounts = Account::query()
+            ->where('company_id', $company->id)
+            ->orderBy('code')
+            ->get();
+
+        $includeDynamicAccounts = $request->boolean('include_dynamic');
+        $visibleAccounts = $this->visibleChartAccounts($allAccounts, $includeDynamicAccounts);
+        $accountFilters = $this->chartAccountFilters($request);
+        $filteredAccounts = $this->filterAccounts($visibleAccounts, $accountFilters);
+        $rows = $this->chartAccountRows($filteredAccounts);
+
+        return view('chart_of_accounts_print', compact(
+            'company',
+            'rows',
+            'accountFilters',
+            'includeDynamicAccounts'
+        ));
+    }
+
+    public function exportChartOfAccounts(Request $request): StreamedResponse
+    {
+        $company = $this->company($request);
+        $allAccounts = Account::query()
+            ->where('company_id', $company->id)
+            ->orderBy('code')
+            ->get();
+
+        $includeDynamicAccounts = $request->boolean('include_dynamic');
+        $visibleAccounts = $this->visibleChartAccounts($allAccounts, $includeDynamicAccounts);
+        $accountFilters = $this->chartAccountFilters($request);
+        $rows = $this->chartAccountRows($this->filterAccounts($visibleAccounts, $accountFilters));
+        $fileName = 'chart-of-accounts-' . $company->id . '-' . now()->format('Ymd-His') . '.csv';
+
+        return response()->streamDownload(function () use ($rows): void {
+            $output = fopen('php://output', 'wb');
+            fwrite($output, "\xEF\xBB\xBF");
+            fputcsv($output, ['الرمز', 'اسم الحساب', 'النوع', 'الوصف', 'رقم تعريفي للحساب الأصلي', 'يمكن الدفع والتحصيل بهذا الحساب']);
+
+            foreach ($rows as $row) {
+                fputcsv($output, [
+                    $row['code'],
+                    $row['name'],
+                    $row['display_account_type'],
+                    $row['description'],
+                    $row['parent_label'],
+                    $row['allows_direct_transactions'] ? 'نعم' : 'لا',
+                ]);
+            }
+
+            fclose($output);
+        }, $fileName, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
     }
 
     public function showAccount(Request $request, Account $account): View
@@ -3308,6 +3391,13 @@ class AccountingPageController extends Controller
             'due_date' => ['nullable', 'date', 'after_or_equal:invoice_date'],
             'status' => ['required', Rule::in(['draft', 'sent'])],
             'payment_status' => ['nullable', Rule::in(['deferred', 'partial', 'full'])],
+            'payment_account_id' => [
+                'nullable',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                    ->where('company_id', $companyId)
+                    ->where('allows_direct_transactions', true)
+                    ->where('is_active', true)),
+            ],
             'paid_amount' => ['nullable', 'numeric', 'min:0'],
             'attachment' => $attachmentRules,
             'notes' => ['nullable', 'string'],
@@ -3346,6 +3436,7 @@ class AccountingPageController extends Controller
 
         if ($requestedPaymentStatus === 'deferred') {
             $validated['paid_amount'] = 0;
+            $validated['payment_account_id'] = null;
         }
 
         if ($requestedPaymentStatus === 'full') {
@@ -3364,6 +3455,12 @@ class AccountingPageController extends Controller
             }
 
             $validated['paid_amount'] = $enteredPaidAmount;
+        }
+
+        if (in_array($requestedPaymentStatus, ['partial', 'full'], true) && empty($validated['payment_account_id'])) {
+            throw ValidationException::withMessages([
+                'payment_account_id' => 'اختر حساب التحصيل من شجرة الحسابات عند تسجيل مبلغ محصل.',
+            ]);
         }
 
         return $validated;
@@ -3804,6 +3901,32 @@ class AccountingPageController extends Controller
         return $this->nestAccounts($accounts, null);
     }
 
+    private function chartAccountFilters(Request $request): array
+    {
+        return [
+            'search' => trim($request->string('search')->toString()),
+            'account_type' => $request->string('account_type')->toString(),
+            'min_balance' => $request->string('min_balance')->toString(),
+            'max_balance' => $request->string('max_balance')->toString(),
+        ];
+    }
+
+    private function visibleChartAccounts(Collection $accounts, bool $includeDynamicAccounts): Collection
+    {
+        if ($includeDynamicAccounts) {
+            return $accounts->values();
+        }
+
+        return $accounts
+            ->reject(fn (Account $account) => $this->isDynamicChartAccount($account))
+            ->values();
+    }
+
+    private function isDynamicChartAccount(Account $account): bool
+    {
+        return preg_match('/^(1103-C\d+|2101-S\d+|4101-P\d+|1106-P\d+|5101-P\d+)$/', $account->code) === 1;
+    }
+
     private function sortDirection(Request $request, string $parameter = 'sort_direction', string $default = 'desc'): string
     {
         $value = strtolower($request->string($parameter)->toString());
@@ -3857,6 +3980,27 @@ class AccountingPageController extends Controller
                 $account->setRelation('children', $this->nestAccounts($accounts, $account->id));
 
                 return $account;
+            });
+    }
+
+    private function chartAccountRows(Collection $accounts): Collection
+    {
+        $accountsById = $accounts->keyBy('id');
+
+        return $accounts
+            ->sortBy('code')
+            ->values()
+            ->map(function (Account $account) use ($accountsById) {
+                $parent = $account->parent_id ? $accountsById->get($account->parent_id) : null;
+
+                return [
+                    'code' => $account->code,
+                    'name' => $account->name_ar ?: $account->name,
+                    'display_account_type' => $account->display_account_type ?: $account->account_type,
+                    'description' => $account->description ?: '',
+                    'parent_label' => $parent ? ($parent->code . ' - ' . ($parent->name_ar ?: $parent->name)) : '',
+                    'allows_direct_transactions' => (bool) $account->allows_direct_transactions,
+                ];
             });
     }
 
@@ -3969,6 +4113,13 @@ class AccountingPageController extends Controller
             'due_date' => ['nullable', 'date', 'after_or_equal:purchase_date'],
             'status' => ['nullable', Rule::in(['draft', 'pending', 'approved'])],
             'payment_status' => ['required', Rule::in(['pending', 'partial', 'paid'])],
+            'payment_account_id' => [
+                'nullable',
+                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                    ->where('company_id', $companyId)
+                    ->where('allows_direct_transactions', true)
+                    ->where('is_active', true)),
+            ],
             'paid_amount' => ['nullable', 'numeric', 'min:0'],
             'payment_date' => ['nullable', 'date', 'after_or_equal:purchase_date'],
             'notes' => ['nullable', 'string'],
@@ -3996,6 +4147,7 @@ class AccountingPageController extends Controller
         if ($requestedPaymentStatus === 'pending') {
             $validated['payment_date'] = null;
             $validated['paid_amount'] = 0;
+            $validated['payment_account_id'] = null;
         }
 
         if ($requestedPaymentStatus === 'paid') {
@@ -4016,7 +4168,23 @@ class AccountingPageController extends Controller
             $validated['paid_amount'] = $enteredPaidAmount;
         }
 
+        if (in_array($requestedPaymentStatus, ['partial', 'paid'], true) && empty($validated['payment_account_id'])) {
+            throw ValidationException::withMessages([
+                'payment_account_id' => 'اختر حساب السداد من شجرة الحسابات عند تسجيل مبلغ مدفوع.',
+            ]);
+        }
+
         return $validated;
+    }
+
+    private function directPaymentAccounts(int $companyId): Collection
+    {
+        return Account::query()
+            ->where('company_id', $companyId)
+            ->where('allows_direct_transactions', true)
+            ->where('is_active', true)
+            ->orderBy('code')
+            ->get();
     }
 
     private function defaultBranchId(int $companyId): ?int
@@ -4599,6 +4767,7 @@ class AccountingPageController extends Controller
     {
         $customers = Customer::where('company_id', $company->id)->orderBy('name')->get();
         $products = Product::forCompany($company->id)->active()->orderBy('name')->get();
+        $paymentAccounts = $this->directPaymentAccounts($company->id);
         $salesChannels = SalesChannel::query()->where('company_id', $company->id)->orderByDesc('is_default')->orderBy('name')->get();
         $defaultTaxRate = 15;
         $defaultSalesChannelId = $this->defaultSalesChannelId($company->id);
@@ -4612,6 +4781,7 @@ class AccountingPageController extends Controller
             'company',
             'customers',
             'products',
+            'paymentAccounts',
             'salesChannels',
             'defaultTaxRate',
             'defaultSalesChannelId',

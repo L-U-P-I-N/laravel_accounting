@@ -52,28 +52,12 @@ return new class extends Migration
             });
         }
 
-        if (! Schema::hasTable('payment_methods')) {
-            Schema::create('payment_methods', function (Blueprint $table) {
-                $table->id();
-                $table->foreignId('company_id')->constrained()->cascadeOnDelete();
-                $table->string('name', 150);
-                $table->string('code', 50)->nullable();
-                $table->string('type', 50)->default('other');
-                $table->boolean('is_default')->default(false);
-                $table->timestamps();
-
-                $table->unique(['company_id', 'name']);
-                $table->index(['company_id', 'is_default']);
-            });
-        }
-
         if (! Schema::hasTable('payments')) {
             Schema::create('payments', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('company_id')->constrained()->cascadeOnDelete();
                 $table->foreignId('invoice_id')->nullable()->constrained('invoices')->nullOnDelete();
                 $table->foreignId('customer_id')->nullable()->constrained('customers')->nullOnDelete();
-                $table->foreignId('payment_method_id')->nullable()->constrained('payment_methods')->nullOnDelete();
                 $table->decimal('amount', 15, 2)->default(0);
                 $table->date('payment_date');
                 $table->string('reference', 100)->nullable();
@@ -81,7 +65,6 @@ return new class extends Migration
                 $table->timestamps();
 
                 $table->index(['company_id', 'payment_date']);
-                $table->index(['invoice_id', 'payment_method_id']);
             });
         }
 
@@ -154,7 +137,6 @@ return new class extends Migration
         }
 
         Schema::dropIfExists('payments');
-        Schema::dropIfExists('payment_methods');
         Schema::dropIfExists('sales_channels');
         Schema::dropIfExists('categories');
         Schema::dropIfExists('branches');
@@ -197,21 +179,10 @@ return new class extends Migration
                 'updated_at' => $timestamp,
             ]);
 
-            $defaultPaymentMethodId = $this->ensureRecord('payment_methods', [
-                'company_id' => $company->id,
-                'name' => 'غير محدد',
-            ], [
-                'code' => 'UNSPECIFIED',
-                'type' => 'other',
-                'is_default' => true,
-                'created_at' => $timestamp,
-                'updated_at' => $timestamp,
-            ]);
-
             $this->backfillProductCategories((int) $company->id, (int) $defaultCategoryId, $timestamp);
             $this->backfillInvoiceItemsCategories((int) $company->id, (int) $defaultCategoryId);
             $this->backfillInvoiceDimensions((int) $company->id, (int) $branchId, (int) $channelId);
-            $this->backfillPayments((int) $company->id, (int) $defaultPaymentMethodId, $timestamp);
+            $this->backfillPayments((int) $company->id, $timestamp);
         }
     }
 
@@ -289,7 +260,7 @@ return new class extends Migration
             ->update(['sales_channel_id' => $channelId]);
     }
 
-    private function backfillPayments(int $companyId, int $paymentMethodId, $timestamp): void
+    private function backfillPayments(int $companyId, $timestamp): void
     {
         $invoices = DB::table('invoices')
             ->leftJoin('payments', 'payments.invoice_id', '=', 'invoices.id')
@@ -304,7 +275,6 @@ return new class extends Migration
                 'company_id' => $companyId,
                 'invoice_id' => $invoice->id,
                 'customer_id' => $invoice->customer_id,
-                'payment_method_id' => $paymentMethodId,
                 'amount' => $invoice->paid_amount,
                 'payment_date' => $invoice->invoice_date,
                 'reference' => 'AUTO-' . $invoice->invoice_number,

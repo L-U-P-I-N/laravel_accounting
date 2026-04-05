@@ -208,4 +208,64 @@ class DocumentNumberGeneratorTest extends TestCase
         $this->assertSame('JRN-2026-00003', $generator->nextJournalEntryNumber($company->id));
         $this->assertSame('SUP-PMT-2026-00002', $generator->nextSupplierPaymentNumber($company->id));
     }
+
+    public function test_it_uses_highest_existing_journal_number_instead_of_count(): void
+    {
+        $company = Company::create([
+            'name' => 'Gap Co',
+            'country_code' => 'SA',
+            'currency' => 'SAR',
+        ]);
+
+        $user = User::factory()->create([
+            'first_name' => 'Gap',
+            'last_name' => 'Owner',
+            'name' => 'Gap Owner',
+            'role' => 'owner',
+            'company_id' => $company->id,
+            'must_change_password' => false,
+            'is_active' => true,
+        ]);
+
+        JournalEntry::create([
+            'entry_number' => 'JRN-2026-00001',
+            'entry_date' => '2026-03-26',
+            'description' => 'First Entry',
+            'reference' => 'REF-1',
+            'entry_type' => 'manual',
+            'entry_origin' => 'manual',
+            'status' => 'posted',
+            'total_debit' => 10,
+            'total_credit' => 10,
+            'company_id' => $company->id,
+            'created_by' => $user->id,
+            'posted_by' => $user->id,
+            'posted_at' => now(),
+        ]);
+
+        JournalEntry::create([
+            'entry_number' => 'JRN-2026-00008',
+            'entry_date' => '2026-03-26',
+            'description' => 'Latest Entry',
+            'reference' => 'REF-8',
+            'entry_type' => 'manual',
+            'entry_origin' => 'manual',
+            'status' => 'posted',
+            'total_debit' => 10,
+            'total_credit' => 10,
+            'company_id' => $company->id,
+            'created_by' => $user->id,
+            'posted_by' => $user->id,
+            'posted_at' => now(),
+        ]);
+
+        JournalEntry::query()
+            ->where('company_id', $company->id)
+            ->where('entry_number', 'JRN-2026-00001')
+            ->delete();
+
+        $generator = app(DocumentNumberGenerator::class);
+
+        $this->assertSame('JRN-2026-00009', $generator->nextJournalEntryNumber($company->id));
+    }
 }

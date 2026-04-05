@@ -9,10 +9,11 @@ use App\Models\Customer;
 use App\Models\Employee;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\Account;
 use App\Models\Payment;
-use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\SalesChannel;
+use App\Support\ChartOfAccountsSynchronizer;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -32,6 +33,8 @@ class DemoSalesReportsSeeder extends Seeder
             return;
         }
 
+        app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+
         $dimensions = $this->seedDimensions($company);
         $customers = $this->seedCustomers($company);
         $employees = $this->seedEmployees($company);
@@ -46,7 +49,7 @@ class DemoSalesReportsSeeder extends Seeder
             $products,
             $dimensions['branches'],
             $dimensions['channels'],
-            $dimensions['paymentMethods']
+            $dimensions['paymentAccounts']
         );
 
         $this->refreshCustomerBalances($company);
@@ -87,21 +90,19 @@ class DemoSalesReportsSeeder extends Seeder
             array_merge($channel, ['company_id' => $company->id])
         ))->values();
 
-        $paymentMethods = collect([
-            ['name' => 'تحويل بنكي', 'code' => 'BANK_TRANSFER', 'type' => 'bank', 'is_default' => true],
-            ['name' => 'بطاقة مدى', 'code' => 'MADA', 'type' => 'card', 'is_default' => false],
-            ['name' => 'نقدي', 'code' => 'CASH', 'type' => 'cash', 'is_default' => false],
-            ['name' => 'بطاقة ائتمان', 'code' => 'CREDIT_CARD', 'type' => 'card', 'is_default' => false],
-        ])->map(fn (array $method) => PaymentMethod::query()->updateOrCreate(
-            ['company_id' => $company->id, 'code' => $method['code']],
-            array_merge($method, ['company_id' => $company->id])
-        ))->values();
+        $paymentAccounts = Account::query()
+            ->where('company_id', $company->id)
+            ->where('allows_direct_transactions', true)
+            ->where('is_active', true)
+            ->orderBy('code')
+            ->get()
+            ->values();
 
         return [
             'branches' => $branches,
             'categories' => $categories,
             'channels' => $channels,
-            'paymentMethods' => $paymentMethods,
+            'paymentAccounts' => $paymentAccounts,
         ];
     }
 
@@ -228,7 +229,7 @@ class DemoSalesReportsSeeder extends Seeder
         Collection $products,
         Collection $branches,
         Collection $channels,
-        Collection $paymentMethods
+        Collection $paymentAccounts
     ): void {
         $productMixes = [
             ['HW-WS-01', 'NW-AP-04', 'SV-SUP-09'],
@@ -249,7 +250,8 @@ class DemoSalesReportsSeeder extends Seeder
             $employee = $employees->get(($index + 1) % $employees->count());
             $branch = $branches->get(($index - 1) % $branches->count());
             $channel = $channels->get(($index + 2) % $channels->count());
-            $paymentMethod = $paymentMethods->get(($index + 1) % $paymentMethods->count());
+            $paymentAccount = $paymentAccounts->get(($index + 1) % $paymentAccounts->count())
+                ?? $paymentAccounts->first();
             $mix = $productMixes[($index - 1) % count($productMixes)];
             $adjustment = $priceAdjustments[($index - 1) % count($priceAdjustments)];
             $lines = [];
@@ -311,7 +313,7 @@ class DemoSalesReportsSeeder extends Seeder
                 'company_id' => $company->id,
                 'branch_id' => $branch->id,
                 'sales_channel_id' => $channel->id,
-                'payment_method_id' => $paymentMethod->id,
+                'payment_account_id' => $paidAmount > 0 ? $paymentAccount?->id : null,
                 'invoice_date' => $invoiceDate->toDateString(),
                 'due_date' => $invoiceDate->copy()->addDays($status === 'sent' ? 21 : 14)->toDateString(),
                 'subtotal' => $subtotal,
@@ -340,11 +342,11 @@ class DemoSalesReportsSeeder extends Seeder
                 ]);
             }
 
-            $this->seedPaymentsForInvoice($invoice, $paymentMethod->id, $invoiceDate, $paidAmount);
+            $this->seedPaymentsForInvoice($invoice, $paymentAccount?->id, $invoiceDate, $paidAmount);
         }
     }
 
-    private function seedPaymentsForInvoice(Invoice $invoice, int $paymentMethodId, Carbon $invoiceDate, float $paidAmount): void
+    private function seedPaymentsForInvoice(Invoice $invoice, ?int $paymentAccountId, Carbon $invoiceDate, float $paidAmount): void
     {
         if ($paidAmount <= 0) {
             return;
@@ -367,7 +369,7 @@ class DemoSalesReportsSeeder extends Seeder
                 'company_id' => $invoice->company_id,
                 'invoice_id' => $invoice->id,
                 'customer_id' => $invoice->customer_id,
-                'payment_method_id' => $paymentMethodId,
+                'payment_account_id' => $paymentAccountId,
                 'amount' => $amount,
                 'payment_date' => $invoiceDate->copy()->addDays(2 + ($index * 6))->toDateString(),
                 'reference' => 'PAY-RPT-' . $invoice->invoice_number . '-' . ($index + 1),

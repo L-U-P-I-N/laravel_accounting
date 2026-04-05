@@ -3,7 +3,7 @@
 @section('title', 'تفاصيل الحساب')
 
 @php
-    $accountTypeLabel = match ($account->account_type) {
+    $accountTypeLabel = $account->display_account_type ?: match ($account->account_type) {
         'asset' => 'أصل',
         'liability' => 'خصم',
         'equity' => 'حق ملكية',
@@ -40,7 +40,7 @@
             <div class="stat-card">
                 <div class="stat-icon green"><i class="fas fa-layer-group"></i></div>
                 <div class="stat-value fs-5">{{ $accountTypeLabel }}</div>
-                <div class="stat-label">نوع الحساب</div>
+                <div class="stat-label">النوع</div>
             </div>
         </div>
         <div class="col-md-3 mb-3 mb-md-0">
@@ -71,7 +71,7 @@
                     <div class="col-md-6"><strong>الكود</strong><div class="text-muted mt-1">{{ $account->code }}</div></div>
                     <div class="col-md-6"><strong>الاسم</strong><div class="text-muted mt-1">{{ $account->name }}</div></div>
                     <div class="col-md-6"><strong>الاسم بالعربي</strong><div class="text-muted mt-1">{{ $account->name_ar ?: '-' }}</div></div>
-                    <div class="col-md-6"><strong>التصنيف</strong><div class="text-muted mt-1">{{ $accountTypeLabel }}</div></div>
+                    <div class="col-md-6"><strong>النوع</strong><div class="text-muted mt-1">{{ $accountTypeLabel }}</div></div>
                     <div class="col-md-6"><strong>الوضع داخل الشجرة</strong><div class="text-muted mt-1">{{ $hierarchyLabel }}</div></div>
                     <div class="col-md-6"><strong>حساب نظام</strong><div class="text-muted mt-1">{{ $account->is_system ? 'نعم' : 'لا' }}</div></div>
                     <div class="col-md-6"><strong>قابل للدفع/التحصيل</strong><div class="text-muted mt-1">{{ $account->allows_direct_transactions ? 'نعم' : 'لا' }}</div></div>

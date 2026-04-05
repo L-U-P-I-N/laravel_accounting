@@ -26,8 +26,7 @@ class Purchase extends Model
         'balance_due',
         'status',
         'payment_status',
-        'payment_method_id',
-        'payment_method',
+        'payment_account_id',
         'payment_date',
         'notes',
         'terms',
@@ -62,9 +61,9 @@ class Purchase extends Model
         return $this->hasMany(PurchaseItem::class);
     }
 
-    public function paymentMethod(): BelongsTo
+    public function paymentAccount(): BelongsTo
     {
-        return $this->belongsTo(PaymentMethod::class);
+        return $this->belongsTo(Account::class, 'payment_account_id');
     }
 
     public function payments(): HasMany

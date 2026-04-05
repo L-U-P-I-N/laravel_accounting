@@ -9,6 +9,7 @@
     $customerIdValue = old('customer_id', $isEditingInvoice ? $invoice->customer_id : null);
     $salesChannelIdValue = old('sales_channel_id', $isEditingInvoice ? $invoice->sales_channel_id : ($defaultSalesChannelId ?? null));
     $paymentStatusValue = old('payment_status', $isEditingInvoice ? match ($invoice->payment_status) { 'paid' => 'full', 'pending' => 'deferred', default => $invoice->payment_status } : 'deferred');
+    $paymentAccountIdValue = old('payment_account_id', $isEditingInvoice ? $invoice->payment_account_id : null);
     $paidAmountValue = old('paid_amount', $isEditingInvoice ? number_format((float) $invoice->paid_amount, 2, '.', '') : '0');
     $invoiceStatusValue = old('status', $isEditingInvoice ? $invoice->status : 'sent');
     $notesValue = old('notes', $isEditingInvoice ? $invoice->notes : '');
@@ -187,10 +188,23 @@
                 @error('paid_amount')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
+                <label class="form-label">حساب التحصيل</label>
+                <select name="payment_account_id" class="form-select @error('payment_account_id') is-invalid @enderror">
+                    <option value="">اختر الحساب</option>
+                    @foreach ($paymentAccounts as $account)
+                        <option value="{{ $account->id }}" {{ (string) $paymentAccountIdValue === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>
+                    @endforeach
+                </select>
+                @error('payment_account_id')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+            </div>
+            <div class="col-md-3 mb-3 mb-md-0">
                 <label class="form-label">المبلغ المتبقي</label>
                 <input type="text" class="form-control" value="0.00 {{ $company->currency }}" data-balance-due readonly>
             </div>
-            <div class="col-md-3">
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-4">
                 <label class="form-label">مرفق الفاتورة</label>
                 <input type="file" name="attachment" class="form-control @error('attachment') is-invalid @enderror" accept="application/pdf,image/*">
                 @error('attachment')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror

@@ -3,12 +3,12 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\AccountingPageController;
+use App\Models\Account;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InventoryMovement;
 use App\Models\Invoice;
 use App\Models\Payment;
-use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
@@ -50,15 +50,8 @@ class InventoryAndPaymentSyncTest extends TestCase
             'tax_rate' => 15,
             'is_active' => true,
         ]);
-        $paymentMethod = PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'نقدي',
-            'code' => 'CASH',
-            'type' => 'cash',
-            'is_default' => true,
-        ]);
-
         app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+        $paymentAccount = $this->paymentAccount($company->id);
 
         $request = Request::create('/invoices', 'POST', [
             'customer_id' => $customer->id,
@@ -66,7 +59,7 @@ class InventoryAndPaymentSyncTest extends TestCase
             'due_date' => '2026-05-03',
             'status' => 'sent',
             'payment_status' => 'full',
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'item_product_id' => [$product->id],
             'item_description' => ['منتج اختبار'],
             'item_quantity' => [2],
@@ -187,15 +180,8 @@ class InventoryAndPaymentSyncTest extends TestCase
             'name' => 'مورد سداد',
             'is_active' => true,
         ]);
-        PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'افتراضي',
-            'code' => 'DEFAULT',
-            'type' => 'cash',
-            'is_default' => true,
-        ]);
-
         app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+        $paymentAccount = $this->paymentAccount($company->id);
 
         Purchase::create([
             'purchase_number' => 'PUR-OPEN-1',
@@ -215,6 +201,7 @@ class InventoryAndPaymentSyncTest extends TestCase
 
         $request = Request::create('/suppliers/' . $supplier->id . '/payments', 'POST', [
             'payment_amount' => 75,
+            'payment_account_id' => $paymentAccount->id,
             'payment_reference' => 'SUP-PMT-TEST',
         ]);
         $request->setUserResolver(fn () => $user);
@@ -245,15 +232,8 @@ class InventoryAndPaymentSyncTest extends TestCase
             'name' => 'مورد دفعات',
             'is_active' => true,
         ]);
-        $paymentMethod = PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'تحويل بنكي',
-            'code' => 'BANK',
-            'type' => 'bank',
-            'is_default' => true,
-        ]);
-
         app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+        $paymentAccount = $this->paymentAccount($company->id);
 
         $purchase = Purchase::create([
             'purchase_number' => 'PUR-2026-0100',
@@ -267,7 +247,7 @@ class InventoryAndPaymentSyncTest extends TestCase
             'balance_due' => 95,
             'status' => 'approved',
             'payment_status' => 'partial',
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'payment_date' => '2026-04-03',
             'currency' => 'SAR',
             'exchange_rate' => 1,
@@ -278,7 +258,7 @@ class InventoryAndPaymentSyncTest extends TestCase
         $request = Request::create('/purchases/' . $purchase->id . '/payments', 'POST', [
             'payment_amount' => 30,
             'payment_date' => '2026-04-04',
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'payment_reference' => 'PUR-PMT-TEST',
         ]);
         $request->setUserResolver(fn () => $user);
@@ -330,13 +310,8 @@ class InventoryAndPaymentSyncTest extends TestCase
             'tax_rate' => 15,
             'is_active' => true,
         ]);
-        $paymentMethod = PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'نقدي',
-            'code' => 'CASH',
-            'type' => 'cash',
-            'is_default' => true,
-        ]);
+        app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+        $paymentAccount = $this->paymentAccount($company->id);
 
         $purchase = Purchase::create([
             'purchase_number' => 'PUR-2026-0200',
@@ -350,7 +325,7 @@ class InventoryAndPaymentSyncTest extends TestCase
             'balance_due' => 26,
             'status' => 'approved',
             'payment_status' => 'partial',
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'payment_date' => '2026-04-05',
             'currency' => 'SAR',
             'exchange_rate' => 1,
@@ -360,7 +335,7 @@ class InventoryAndPaymentSyncTest extends TestCase
             'company_id' => $company->id,
             'purchase_id' => $purchase->id,
             'supplier_id' => $supplier->id,
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'amount' => 20,
             'payment_direction' => 'out',
             'payment_category' => 'purchase_payment',
@@ -429,13 +404,8 @@ class InventoryAndPaymentSyncTest extends TestCase
             'tax_rate' => 15,
             'is_active' => true,
         ]);
-        $paymentMethod = PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'تحويل',
-            'code' => 'BANK',
-            'type' => 'bank',
-            'is_default' => true,
-        ]);
+        app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+        $paymentAccount = $this->paymentAccount($company->id);
         $purchase = Purchase::create([
             'purchase_number' => 'PUR-SORT',
             'supplier_id' => $supplier->id,
@@ -448,7 +418,7 @@ class InventoryAndPaymentSyncTest extends TestCase
             'balance_due' => 95,
             'status' => 'approved',
             'payment_status' => 'partial',
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'currency' => 'SAR',
             'exchange_rate' => 1,
         ]);
@@ -457,7 +427,7 @@ class InventoryAndPaymentSyncTest extends TestCase
             'company_id' => $company->id,
             'purchase_id' => $purchase->id,
             'supplier_id' => $supplier->id,
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'amount' => 30,
             'payment_direction' => 'out',
             'payment_category' => 'purchase_payment',
@@ -469,7 +439,7 @@ class InventoryAndPaymentSyncTest extends TestCase
             'company_id' => $company->id,
             'purchase_id' => $purchase->id,
             'supplier_id' => $supplier->id,
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'amount' => 10,
             'payment_direction' => 'out',
             'payment_category' => 'purchase_payment',
@@ -535,5 +505,13 @@ class InventoryAndPaymentSyncTest extends TestCase
             'must_change_password' => false,
             'company_id' => $company->id,
         ]);
+    }
+
+    private function paymentAccount(int $companyId): Account
+    {
+        return Account::query()
+            ->where('company_id', $companyId)
+            ->where('code', '110201')
+            ->firstOrFail();
     }
 }

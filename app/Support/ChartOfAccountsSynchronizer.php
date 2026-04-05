@@ -14,7 +14,7 @@ class ChartOfAccountsSynchronizer
     private const BASE_DEFINITIONS = [
         ['code' => '1', 'name' => 'الأصول', 'name_ar' => 'الأصول', 'account_type' => 'asset', 'description' => null, 'allows_direct_transactions' => false, 'match_codes' => ['1000'], 'match_fragments' => ['الأصول', 'Assets']],
         ['code' => '11', 'name' => 'أصول متداولة', 'name_ar' => 'أصول متداولة', 'account_type' => 'asset', 'parent' => '1', 'description' => null, 'allows_direct_transactions' => false, 'match_codes' => ['1.10', '1010'], 'match_fragments' => ['أصول متداولة', 'الأصول المتداولة', 'Current Assets']],
-        ['code' => '1101', 'name' => 'النقد ومايعادله', 'name_ar' => 'النقد ومايعادله', 'account_type' => 'asset', 'parent' => '11', 'description' => 'النقدية وما في حكمها (في الخزينة والعهد)', 'allows_direct_transactions' => false, 'match_codes' => ['1.1', '1100', '1101'], 'match_fragments' => ['النقد ومايعادله', 'الصندوق', 'Cash']],
+        ['code' => '1101', 'name' => 'النقد ومايعادله', 'name_ar' => 'النقد ومايعادله', 'account_type' => 'asset', 'parent' => '11', 'description' => 'النقدية وما في حكمها (في الخزينة والعهد)', 'allows_direct_transactions' => false, 'match_codes' => ['1.1', '1100', '1101'], 'match_fragments' => ['النقد ومايعادله', 'النقدية وما في حكمها', 'الصندوق', 'Cash']],
         ['code' => '110101', 'name' => 'النقدية في الخزينة', 'name_ar' => 'النقدية في الخزينة', 'account_type' => 'asset', 'parent' => '1101', 'description' => 'النقدية في الخزينة', 'allows_direct_transactions' => true, 'match_codes' => ['1010'], 'match_fragments' => ['النقدية في الخزينة', 'الصندوق', 'Cash']],
         ['code' => '110102', 'name' => 'العهد النقدية', 'name_ar' => 'العهد النقدية', 'account_type' => 'asset', 'parent' => '1101', 'description' => 'العهد النقدية للموظفين بشكل مؤقت أو دائم لدفع مصروفات المنشأة', 'allows_direct_transactions' => true, 'match_fragments' => ['العهد النقدية', 'عهد نقدية']],
         ['code' => '1102', 'name' => 'النقدية في البنك', 'name_ar' => 'النقدية في البنك', 'account_type' => 'asset', 'parent' => '11', 'description' => 'النقدية في البنوك', 'allows_direct_transactions' => false, 'match_codes' => ['1102', '1020'], 'match_fragments' => ['النقدية في البنك', 'البنك', 'Bank']],
@@ -74,7 +74,7 @@ class ChartOfAccountsSynchronizer
         ['code' => '5103', 'name' => 'عمولات البيع', 'name_ar' => 'عمولات البيع', 'account_type' => 'expense', 'parent' => '51', 'description' => 'عمولات البيع', 'allows_direct_transactions' => false],
         ['code' => '5104', 'name' => 'شحن وتخليص جمركي', 'name_ar' => 'شحن وتخليص جمركي', 'account_type' => 'expense', 'parent' => '51', 'description' => 'شحن وتخليص جمركي للبضاعة المستوردة من الخارج', 'allows_direct_transactions' => false],
         ['code' => '52', 'name' => 'التكاليف التشغيلية', 'name_ar' => 'التكاليف التشغيلية', 'account_type' => 'expense', 'parent' => '5', 'description' => 'تكاليف تشغيلية', 'allows_direct_transactions' => false, 'match_codes' => ['4.10', '6010'], 'match_fragments' => ['التكاليف التشغيلية', 'المصروفات الإدارية', 'Operating Expenses']],
-        ['code' => '5201', 'name' => 'الرواتب والرسوم الإدارية', 'name_ar' => 'الرواتب والرسوم الإدارية', 'account_type' => 'expense', 'parent' => '52', 'description' => 'رواتب وأجور الموظفين الإداريين', 'allows_direct_transactions' => false, 'match_codes' => ['4.1', '6100', '5300'], 'match_fragments' => ['الرواتب والرسوم الإدارية', 'رواتب', 'Salaries']],
+        ['code' => '5201', 'name' => 'الرواتب والرسوم الإدارية', 'name_ar' => 'الرواتب والرسوم الإدارية', 'account_type' => 'expense', 'parent' => '52', 'description' => 'رواتب وأجور الموظفين الإداريين', 'allows_direct_transactions' => false, 'match_codes' => ['4.1', '6100', '5300'], 'match_fragments' => ['الرواتب والرسوم الإدارية', 'رواتب وأجور إدارية', 'رواتب', 'Salaries']],
         ['code' => '5202', 'name' => 'تأمين طبي', 'name_ar' => 'تأمين طبي', 'account_type' => 'expense', 'parent' => '52', 'description' => 'تأمين طبي وعلاج', 'allows_direct_transactions' => false],
         ['code' => '5203', 'name' => 'مصاريف تسويقية ودعائية', 'name_ar' => 'مصاريف تسويقية ودعائية', 'account_type' => 'expense', 'parent' => '52', 'description' => 'مصاريف تسويقية ودعائية', 'allows_direct_transactions' => false, 'match_codes' => ['4.6', '6500', '5500'], 'match_fragments' => ['مصاريف تسويقية', 'تسويق', 'Marketing']],
         ['code' => '5204', 'name' => 'مصاريف الإيجار', 'name_ar' => 'مصاريف الإيجار', 'account_type' => 'expense', 'parent' => '52', 'description' => 'إيجار المكتب', 'allows_direct_transactions' => false, 'match_codes' => ['4.2', '6200', '5200'], 'match_fragments' => ['مصاريف الإيجار', 'إيجار', 'Rent']],
@@ -83,7 +83,7 @@ class ChartOfAccountsSynchronizer
         ['code' => '5207', 'name' => 'التأمينات الاجتماعية', 'name_ar' => 'التأمينات الاجتماعية', 'account_type' => 'expense', 'parent' => '52', 'description' => 'نسبة التأمينات الاجتماعية تدفع شهرياً', 'allows_direct_transactions' => false],
         ['code' => '5208', 'name' => 'الرسوم الحكومية', 'name_ar' => 'الرسوم الحكومية', 'account_type' => 'expense', 'parent' => '52', 'description' => 'مثل رسوم تجديد السجل التجاري والبلدية وختم الغرفة التجارية', 'allows_direct_transactions' => false],
         ['code' => '5209', 'name' => 'رسوم واشتراكات', 'name_ar' => 'رسوم واشتراكات', 'account_type' => 'expense', 'parent' => '52', 'description' => 'رسوم اشتراكات', 'allows_direct_transactions' => false],
-        ['code' => '5210', 'name' => 'مصاريف خدمات المكتب', 'name_ar' => 'مصاريف خدمات المكتب', 'account_type' => 'expense', 'parent' => '52', 'description' => 'فواتير الماء والكهرباء والهاتف والانترنت', 'allows_direct_transactions' => false, 'match_codes' => ['4.5', '6400'], 'match_fragments' => ['مصاريف خدمات المكتب', 'مرافق', 'Utilities']],
+        ['code' => '5210', 'name' => 'مصاريف خدمات المكتب', 'name_ar' => 'مصاريف خدمات المكتب', 'account_type' => 'expense', 'parent' => '52', 'description' => 'فواتير الماء والكهرباء والهاتف والانترنت', 'allows_direct_transactions' => false, 'match_codes' => ['4.5', '6400'], 'match_fragments' => ['مصاريف خدمات المكتب', 'رسوم خدمات المكتب', 'مرافق', 'Utilities']],
         ['code' => '5211', 'name' => 'مصاريف مكتبية ومطبوعات', 'name_ar' => 'مصاريف مكتبية ومطبوعات', 'account_type' => 'expense', 'parent' => '52', 'description' => 'قرطاسية وطباعة', 'allows_direct_transactions' => false],
         ['code' => '5212', 'name' => 'مصاريف ضيافة', 'name_ar' => 'مصاريف ضيافة', 'account_type' => 'expense', 'parent' => '52', 'description' => 'ضيافة ونظافة تخص المنشأة', 'allows_direct_transactions' => false],
         ['code' => '5213', 'name' => 'عمولات بنكية', 'name_ar' => 'عمولات بنكية', 'account_type' => 'expense', 'parent' => '52', 'description' => 'رسوم بنكية عند تحويل من بنك محلي إلى بنك محلي آخر أو لطباعة كشف حساب مختوم', 'allows_direct_transactions' => false, 'match_codes' => ['4.31', '6600'], 'match_fragments' => ['عمولات بنكية', 'رسوم بنكية', 'Bank Charges']],
@@ -98,6 +98,95 @@ class ChartOfAccountsSynchronizer
         ['code' => '5302', 'name' => 'الضرائب', 'name_ar' => 'الضرائب', 'account_type' => 'expense', 'parent' => '53', 'description' => 'ضريبة الدخل تدفع لهيئة الزكاة والدخل', 'allows_direct_transactions' => false],
         ['code' => '5303', 'name' => 'ترجمة عملات أجنبية', 'name_ar' => 'ترجمة عملات أجنبية', 'account_type' => 'expense', 'parent' => '53', 'description' => 'الربح أو الخسارة من ترجمة عملات أجنبية', 'allows_direct_transactions' => false],
         ['code' => '5304', 'name' => 'فوائد', 'name_ar' => 'فوائد', 'account_type' => 'expense', 'parent' => '53', 'description' => 'فوائد بنكية', 'allows_direct_transactions' => false],
+    ];
+
+    private const DISPLAY_ACCOUNT_TYPES = [
+        '1' => 'الاصول',
+        '11' => 'الأصول المتداولة',
+        '1101' => 'النقدية ومافي حكمها',
+        '110101' => 'النقدية ومافي حكمها',
+        '110102' => 'عهد نقدية',
+        '1102' => 'حساب البنك',
+        '110201' => 'حساب البنك',
+        '1103' => 'المدينون',
+        '1104' => 'مصروفات مقدمة',
+        '110401' => 'مصروفات مقدمة',
+        '110402' => 'مصروفات مقدمة',
+        '1105' => 'سلف موظفين',
+        '1106' => 'المخزون',
+        '12' => 'الأصول غير المتداولة',
+        '1201' => 'عقارات وآلات ومعدات',
+        '120101' => 'عقارات وآلات ومعدات',
+        '120102' => 'عقارات وآلات ومعدات',
+        '120103' => 'عقارات وآلات ومعدات',
+        '120104' => 'عقارات وآلات ومعدات',
+        '1202' => 'أصول غير ملموسة',
+        '1203' => 'أصول غير متداولة أخرى',
+        '2' => 'الالتزامات',
+        '21' => 'الالتزامات المتداولة',
+        '2101' => 'الدائنون',
+        '2102' => 'مصاريف مستحقة',
+        '2103' => 'الرواتب والمبالغ المستحقة للموظفين',
+        '2104' => 'قروض قصيرة الأجل',
+        '2105' => 'ضريبة القيمة المضافة المستحقة',
+        '2106' => 'الضرائب المستحقة',
+        '2107' => 'الإيرادات المقدمة',
+        '2108' => 'التزامات متداولة أخرى',
+        '2109' => 'مجمع الاستهلاك',
+        '210901' => 'مجمع الاستهلاك',
+        '210902' => 'مجمع الاستهلاك',
+        '210903' => 'مجمع الاستهلاك',
+        '22' => 'الالتزامات غير المتداولة',
+        '2201' => 'قروض طويلة الأجل',
+        '2202' => 'مخصص مكافأة نهاية الخدمة',
+        '3' => 'حقوق الملاك',
+        '31' => 'رأس المال المصدر',
+        '3101' => 'رأس المال',
+        '3102' => 'رأس المال الإضافي المدفوع',
+        '32' => 'حقوق الملاك الأخرى',
+        '3201' => 'حقوق ملكية أخرى',
+        '33' => 'حقوق الملاك الأخرى',
+        '3301' => 'الاحتياطيات',
+        '3302' => 'الاحتياطيات',
+        '34' => 'أرباح/خسائر مبقاة',
+        '3401' => 'الأرباح المبقاة (أو الخسائر)',
+        '3402' => 'الأرباح المبقاة (أو الخسائر)',
+        '4' => 'الايرادات',
+        '41' => 'المبيعات',
+        '4101' => 'المبيعات',
+        '42' => 'الإيرادات الأخرى',
+        '4201' => 'إيرادات أخرى',
+        '5' => 'المصاريف',
+        '51' => 'التكلفة المباشرة',
+        '5101' => 'تكلفة المبيعات',
+        '5102' => 'تكاليف مباشرة أخرى',
+        '5103' => 'تكاليف مباشرة أخرى',
+        '5104' => 'تكاليف مباشرة أخرى',
+        '52' => 'تكاليف تشغيلية',
+        '5201' => 'الرواتب',
+        '5202' => 'مصاريف عمومية وإدارية',
+        '5203' => 'مصاريف تسويقية',
+        '5204' => 'مصاريف عمومية وإدارية',
+        '5205' => 'مكافآت وحوافز',
+        '5206' => 'مصاريف عمومية وإدارية',
+        '5207' => 'مصاريف عمومية وإدارية',
+        '5208' => 'مصاريف عمومية وإدارية',
+        '5209' => 'مصاريف عمومية وإدارية',
+        '5210' => 'مصاريف عمومية وإدارية',
+        '5211' => 'مصاريف عمومية وإدارية',
+        '5212' => 'مصاريف عمومية وإدارية',
+        '5213' => 'مصاريف عمومية وإدارية',
+        '5214' => 'مصاريف عمومية وإدارية',
+        '5215' => 'مصاريف الاستهلاك',
+        '521501' => 'مصاريف الاستهلاك',
+        '521502' => 'مصاريف الاستهلاك',
+        '521503' => 'مصاريف الاستهلاك',
+        '5219' => 'مصاريف عمومية وإدارية',
+        '53' => 'تكاليف غير تشغيلية',
+        '5301' => 'الزكاة',
+        '5302' => 'ضرائب',
+        '5303' => 'ترجمة عملات أجنبية',
+        '5304' => 'مصروف فوائد',
     ];
 
     public function ensureBaseAccounts(int|Company $company): Collection
@@ -123,6 +212,7 @@ class ChartOfAccountsSynchronizer
                 'name' => $definition['name'],
                 'name_ar' => $definition['name_ar'],
                 'account_type' => $definition['account_type'],
+                'display_account_type' => $this->displayAccountTypeForCode($definition['code'], $definition['account_type']),
                 'parent_id' => $parentId,
                 'allows_direct_transactions' => (bool) ($definition['allows_direct_transactions'] ?? false),
                 'is_active' => true,
@@ -313,6 +403,7 @@ class ChartOfAccountsSynchronizer
             'name' => $name,
             'name_ar' => $nameAr,
             'account_type' => $type,
+            'display_account_type' => $this->displayAccountTypeForCode($code, $type),
             'parent_id' => $parentId,
             'allows_direct_transactions' => false,
             'is_active' => true,
@@ -329,5 +420,41 @@ class ChartOfAccountsSynchronizer
         return Account::create(array_merge($payload, [
             'company_id' => $companyId,
         ]));
+    }
+
+    private function displayAccountTypeForCode(string $code, string $accountType): string
+    {
+        if (isset(self::DISPLAY_ACCOUNT_TYPES[$code])) {
+            return self::DISPLAY_ACCOUNT_TYPES[$code];
+        }
+
+        if (str_starts_with($code, '1103-C')) {
+            return 'المدينون';
+        }
+
+        if (str_starts_with($code, '2101-S')) {
+            return 'الدائنون';
+        }
+
+        if (str_starts_with($code, '4101-P')) {
+            return 'المبيعات';
+        }
+
+        if (str_starts_with($code, '1106-P')) {
+            return 'المخزون';
+        }
+
+        if (str_starts_with($code, '5101-P')) {
+            return 'تكلفة المبيعات';
+        }
+
+        return match ($accountType) {
+            'asset' => 'الأصول',
+            'liability' => 'الالتزامات',
+            'equity' => 'حقوق الملكية',
+            'revenue' => 'الإيرادات',
+            'expense' => 'المصاريف',
+            default => 'تكلفة المبيعات',
+        };
     }
 }

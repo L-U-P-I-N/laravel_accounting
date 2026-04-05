@@ -25,7 +25,7 @@ class AccountingService
 
     public function syncInvoiceEntry(Invoice $invoice, User $user): JournalEntry
     {
-        $invoice->loadMissing(['items.product', 'customer.account']);
+        $invoice->loadMissing(['items.product', 'customer.account', 'paymentAccount']);
 
         $lines = collect();
         $paidAmount = $this->normalizeAmount(min((float) $invoice->paid_amount, (float) $invoice->total));
@@ -34,7 +34,7 @@ class AccountingService
         if ($paidAmount > 0) {
             $this->pushLine(
                 $lines,
-                $this->defaultSettlementAccount((int) $invoice->company_id),
+                $this->settlementAccountForInvoice($invoice),
                 'إثبات المقبوض من الفاتورة ' . $invoice->invoice_number,
                 $paidAmount,
                 0,
@@ -127,7 +127,7 @@ class AccountingService
 
     public function syncPurchaseEntry(Purchase $purchase, User $user): JournalEntry
     {
-        $purchase->loadMissing(['items.product', 'supplier.account']);
+        $purchase->loadMissing(['items.product', 'supplier.account', 'paymentAccount']);
 
         $lines = collect();
 
@@ -183,7 +183,7 @@ class AccountingService
         if ($paidAmount > 0) {
             $this->pushLine(
                 $lines,
-                $this->defaultSettlementAccount((int) $purchase->company_id),
+                $this->settlementAccountForPurchase($purchase),
                 'السداد المباشر لطلب الشراء ' . $purchase->purchase_number,
                 0,
                 $paidAmount,
@@ -253,7 +253,7 @@ class AccountingService
         );
     }
 
-    public function createSupplierPaymentEntry(Supplier $supplier, float $paymentAmount, User $user, string $reference): JournalEntry
+    public function createSupplierPaymentEntry(Supplier $supplier, float $paymentAmount, User $user, string $reference, ?Account $settlementAccount = null, ?string $entryDate = null): JournalEntry
     {
         $supplier->loadMissing(['company', 'account']);
 
@@ -265,7 +265,7 @@ class AccountingService
                 'credit' => 0,
             ],
             [
-                'account' => $this->defaultSettlementAccount((int) $supplier->company_id),
+                'account' => $settlementAccount ?? $this->defaultSettlementAccount((int) $supplier->company_id),
                 'description' => 'سداد دفعة للمورد ' . $supplier->name,
                 'debit' => 0,
                 'credit' => round($paymentAmount, 2),
@@ -280,7 +280,7 @@ class AccountingService
             entryType: 'payment',
             description: 'قيد آلي لسداد المورد ' . $supplier->name,
             reference: $reference,
-            entryDate: now()->toDateString(),
+            entryDate: $entryDate ?? now()->toDateString(),
             lines: $lines
         );
     }
@@ -678,6 +678,18 @@ class AccountingService
     private function defaultSettlementAccount(int $companyId): Account
     {
         return $this->bankAccount($companyId);
+    }
+
+    private function settlementAccountForInvoice(Invoice $invoice): Account
+    {
+        return $invoice->paymentAccount
+            ?? $this->defaultSettlementAccount((int) $invoice->company_id);
+    }
+
+    private function settlementAccountForPurchase(Purchase $purchase): Account
+    {
+        return $purchase->paymentAccount
+            ?? $this->defaultSettlementAccount((int) $purchase->company_id);
     }
 
     private function pushLine(Collection $lines, Account $account, string $description, float $debit, float $credit): void

@@ -19,7 +19,7 @@ class Invoice extends Model
         'company_id',
         'branch_id',
         'sales_channel_id',
-        'payment_method_id',
+        'payment_account_id',
         'invoice_date',
         'due_date',
         'subtotal',
@@ -77,9 +77,9 @@ class Invoice extends Model
         return $this->belongsTo(SalesChannel::class, 'sales_channel_id');
     }
 
-    public function paymentMethod(): BelongsTo
+    public function paymentAccount(): BelongsTo
     {
-        return $this->belongsTo(PaymentMethod::class);
+        return $this->belongsTo(Account::class, 'payment_account_id');
     }
 
     public function items(): HasMany

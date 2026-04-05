@@ -10,7 +10,6 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\JournalEntry;
-use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
@@ -151,21 +150,14 @@ class AccountingArchitectureTest extends TestCase
             'tax_rate' => 15,
             'is_active' => true,
         ]);
-        $paymentMethod = PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'نقدي',
-            'code' => 'CASH',
-            'type' => 'cash',
-            'is_default' => true,
-        ]);
-
         app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+        $paymentAccount = Account::query()->where('company_id', $company->id)->where('code', '110201')->firstOrFail();
 
         $invoice = Invoice::create([
             'invoice_number' => 'INV-1001',
             'customer_id' => $customer->id,
             'company_id' => $company->id,
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'invoice_date' => '2026-03-31',
             'due_date' => '2026-04-30',
             'subtotal' => 100,
@@ -191,7 +183,7 @@ class AccountingArchitectureTest extends TestCase
             'total' => 115,
         ]);
 
-        $entry = app(AccountingService::class)->syncInvoiceEntry($invoice->fresh(['items.product', 'customer.account', 'paymentMethod']), $user);
+        $entry = app(AccountingService::class)->syncInvoiceEntry($invoice->fresh(['items.product', 'customer.account', 'paymentAccount']), $user);
         $lines = $entry->lines->keyBy('account.code');
 
         $this->assertSame(60.0, (float) $lines['110201']->debit);
@@ -230,15 +222,8 @@ class AccountingArchitectureTest extends TestCase
             'tax_rate' => 15,
             'is_active' => true,
         ]);
-        $paymentMethod = PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'تحويل بنكي',
-            'code' => 'BANK',
-            'type' => 'bank',
-            'is_default' => true,
-        ]);
-
         app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+        $paymentAccount = Account::query()->where('company_id', $company->id)->where('code', '110201')->firstOrFail();
 
         $purchase = Purchase::create([
             'purchase_number' => 'PUR-1001',
@@ -252,7 +237,7 @@ class AccountingArchitectureTest extends TestCase
             'balance_due' => 85,
             'status' => 'approved',
             'payment_status' => 'partial',
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'payment_date' => '2026-03-31',
             'currency' => 'SAR',
             'exchange_rate' => 1,
@@ -269,7 +254,7 @@ class AccountingArchitectureTest extends TestCase
             'total' => 115,
         ]);
 
-        $entry = app(AccountingService::class)->syncPurchaseEntry($purchase->fresh(['items.product', 'supplier.account', 'paymentMethod']), $user);
+        $entry = app(AccountingService::class)->syncPurchaseEntry($purchase->fresh(['items.product', 'supplier.account', 'paymentAccount']), $user);
         $lines = $entry->lines->keyBy('account.code');
 
         $this->assertSame(100.0, (float) $lines['1106-P' . $product->id]->debit);
@@ -292,14 +277,6 @@ class AccountingArchitectureTest extends TestCase
             'company_id' => $company->id,
             'name' => 'مورد دفعة',
             'is_active' => true,
-        ]);
-
-        PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'نقدي',
-            'code' => 'CASH',
-            'type' => 'cash',
-            'is_default' => true,
         ]);
 
         app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
@@ -344,19 +321,14 @@ class AccountingArchitectureTest extends TestCase
             'tax_rate' => 15,
             'is_active' => true,
         ]);
-        $paymentMethod = PaymentMethod::create([
-            'company_id' => $company->id,
-            'name' => 'تحويل بنكي',
-            'code' => 'BANK',
-            'type' => 'bank',
-            'is_default' => true,
-        ]);
+        app(ChartOfAccountsSynchronizer::class)->synchronizeCompany($company);
+        $paymentAccount = Account::query()->where('company_id', $company->id)->where('code', '110201')->firstOrFail();
 
         $invoice = Invoice::create([
             'invoice_number' => 'INV-RSYNC-1',
             'customer_id' => $customer->id,
             'company_id' => $company->id,
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'invoice_date' => '2026-03-31',
             'subtotal' => 90,
             'tax_amount' => 13.5,
@@ -393,7 +365,7 @@ class AccountingArchitectureTest extends TestCase
             'balance_due' => 49,
             'status' => 'approved',
             'payment_status' => 'partial',
-            'payment_method_id' => $paymentMethod->id,
+            'payment_account_id' => $paymentAccount->id,
             'payment_date' => '2026-03-31',
             'currency' => 'SAR',
             'exchange_rate' => 1,

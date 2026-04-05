@@ -434,6 +434,15 @@
                                         <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $purchase->balance_due, 2, '.', '') }}" step="0.01" value="{{ $paymentPurchaseModalHasErrors ? old('payment_amount') : number_format((float) $purchase->balance_due, 2, '.', '') }}" required>
                                     </div>
                                     <div class="col-md-6">
+                                        <label class="form-label">حساب السداد</label>
+                                        <select name="payment_account_id" class="form-select" required>
+                                            <option value="">اختر الحساب</option>
+                                            @foreach ($paymentAccounts as $account)
+                                                <option value="{{ $account->id }}" {{ (string) ($paymentPurchaseModalHasErrors ? old('payment_account_id') : '') === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
                                         <label class="form-label">تاريخ الدفعة</label>
                                         <input type="date" name="payment_date" class="form-control" value="{{ $paymentPurchaseModalHasErrors ? old('payment_date', now()->format('Y-m-d')) : now()->format('Y-m-d') }}" required>
                                     </div>
@@ -531,6 +540,15 @@
                                     <div class="col-md-4" data-paid-amount-container>
                                         <label class="form-label">المبلغ المدفوع</label>
                                         <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ $editPurchaseModalHasErrors ? old('paid_amount', number_format((float) $purchase->paid_amount, 2, '.', '')) : number_format((float) $purchase->paid_amount, 2, '.', '') }}" data-purchase-paid-amount>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label">حساب السداد</label>
+                                        <select name="payment_account_id" class="form-select">
+                                            <option value="">اختر الحساب</option>
+                                            @foreach ($paymentAccounts as $account)
+                                                <option value="{{ $account->id }}" {{ (string) ($editPurchaseModalHasErrors ? old('payment_account_id', $purchase->payment_account_id) : $purchase->payment_account_id) === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>
+                                            @endforeach
+                                        </select>
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">رقم فاتورة المورد (اختياري)</label>
@@ -672,6 +690,15 @@
                             <div class="col-md-4" data-paid-amount-container>
                                 <label class="form-label">المبلغ المدفوع</label>
                                 <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ old('paid_amount', '0') }}" data-purchase-paid-amount>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">حساب السداد</label>
+                                <select name="payment_account_id" class="form-select">
+                                    <option value="">اختر الحساب</option>
+                                    @foreach ($paymentAccounts as $account)
+                                        <option value="{{ $account->id }}" {{ (string) old('payment_account_id') === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>
+                                    @endforeach
+                                </select>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">رقم فاتورة المورد (اختياري)</label>

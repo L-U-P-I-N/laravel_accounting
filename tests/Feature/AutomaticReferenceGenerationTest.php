@@ -98,7 +98,7 @@ class AutomaticReferenceGenerationTest extends TestCase
         $this->createAccount($company, '2000', 'liability', 'Liabilities');
         $this->createAccount($company, '2100', 'liability', 'Accounts Payable');
         $this->createAccount($company, '1100', 'asset', 'Cash & Bank');
-        $this->createAccount($company, '110201', 'asset', 'Bank Account', null, true);
+        $paymentAccount = $this->createAccount($company, '110201', 'asset', 'Bank Account', null, true);
 
         $supplier = Supplier::create([
             'company_id' => $company->id,
@@ -128,6 +128,7 @@ class AutomaticReferenceGenerationTest extends TestCase
         $request = Request::create('/suppliers/' . $supplier->id . '/payments', 'POST', [
             'supplier_action' => 'payment',
             'payment_amount' => '50.00',
+            'payment_account_id' => $paymentAccount->id,
             'payment_reference' => '',
         ]);
         $request->setUserResolver(fn () => $user);

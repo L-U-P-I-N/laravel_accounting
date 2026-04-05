@@ -24,7 +24,7 @@ class PaymentSyncService
             'purchase_id' => null,
             'customer_id' => $invoice->customer_id,
             'supplier_id' => null,
-            'payment_method_id' => null,
+            'payment_account_id' => $invoice->payment_account_id,
             'journal_entry_id' => $entry?->id,
             'amount' => round((float) $invoice->paid_amount, 2),
             'payment_direction' => 'in',
@@ -63,7 +63,7 @@ class PaymentSyncService
                 'invoice_id' => null,
                 'customer_id' => null,
                 'supplier_id' => $purchase->supplier_id,
-                'payment_method_id' => null,
+                'payment_account_id' => $purchase->payment_account_id,
                 'journal_entry_id' => $entry?->id,
                 'amount' => $expectedAmount,
                 'payment_direction' => 'out',
@@ -74,7 +74,7 @@ class PaymentSyncService
         );
     }
 
-    public function recordPurchasePayment(Purchase $purchase, float $amount, string $paymentDate, string $reference, ?JournalEntry $entry = null, ?int $paymentMethodId = null, ?string $notes = null): Payment
+    public function recordPurchasePayment(Purchase $purchase, float $amount, string $paymentDate, string $reference, ?JournalEntry $entry = null, ?int $paymentAccountId = null, ?string $notes = null): Payment
     {
         return Payment::query()->create([
             'company_id' => (int) $purchase->company_id,
@@ -82,7 +82,7 @@ class PaymentSyncService
             'purchase_id' => (int) $purchase->id,
             'customer_id' => null,
             'supplier_id' => $purchase->supplier_id,
-            'payment_method_id' => $paymentMethodId,
+            'payment_account_id' => $paymentAccountId,
             'journal_entry_id' => $entry?->id,
             'amount' => round($amount, 2),
             'payment_direction' => 'out',
@@ -93,7 +93,7 @@ class PaymentSyncService
         ]);
     }
 
-    public function recordSupplierPayment(Supplier $supplier, float $amount, string $paymentDate, string $reference, ?JournalEntry $entry = null, ?int $paymentMethodId = null): Payment
+    public function recordSupplierPayment(Supplier $supplier, float $amount, string $paymentDate, string $reference, ?JournalEntry $entry = null, ?int $paymentAccountId = null): Payment
     {
         return Payment::query()->updateOrCreate(
             ['journal_entry_id' => $entry?->id],
@@ -103,7 +103,7 @@ class PaymentSyncService
                 'purchase_id' => null,
                 'customer_id' => null,
                 'supplier_id' => (int) $supplier->id,
-                'payment_method_id' => $paymentMethodId,
+                'payment_account_id' => $paymentAccountId,
                 'amount' => round($amount, 2),
                 'payment_direction' => 'out',
                 'payment_category' => 'supplier_payment',
