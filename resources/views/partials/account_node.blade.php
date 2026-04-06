@@ -12,6 +12,9 @@
     $childrenId = 'account-children-' . $account->id;
     $hasChildren = $account->children->isNotEmpty();
     $description = trim((string) $account->description);
+    // Use rolled-up balance for display (aggregates all descendant balances)
+    $displayBalance = $account->rolled_up_balance ?? (float) $account->balance;
+    $isParentWithChildren = $hasChildren && $displayBalance != (float) $account->balance;
 @endphp
 
 @once
@@ -283,9 +286,14 @@
 
                 <div class="coa-node-balance">
                     <span class="coa-label">الرصيد الحالي</span>
-                    <span class="coa-value {{ (float) $account->balance >= 0 ? 'text-success' : 'text-danger' }}">
-                        {{ number_format((float) $account->balance, 2) }} {{ $company->currency }}
+                    <span class="coa-value {{ (float) $displayBalance >= 0 ? 'text-success' : 'text-danger' }}">
+                        {{ number_format((float) $displayBalance, 2) }} {{ $company->currency }}
                     </span>
+                    @if ($isParentWithChildren)
+                        <small class="text-muted d-block" style="font-size: 0.75rem;">
+                            <i class="fas fa-layer-group me-1"></i>مجمع من {{ $account->children->count() }} حساب
+                        </small>
+                    @endif
                 </div>
 
                 <div class="coa-node-actions">

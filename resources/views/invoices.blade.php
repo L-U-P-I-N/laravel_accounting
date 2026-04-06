@@ -62,6 +62,29 @@
 
 @if ($invoices->isNotEmpty())
     @foreach ($invoices as $invoice)
+        @php
+            $effectiveStatus = match (true) {
+                $invoice->status === 'draft' => 'draft',
+                (float) $invoice->paid_amount >= (float) $invoice->total => 'paid',
+                $invoice->due_date && $invoice->due_date->isPast() && (float) $invoice->paid_amount < (float) $invoice->total => 'overdue',
+                (float) $invoice->paid_amount > 0 && (float) $invoice->paid_amount < (float) $invoice->total => 'partial',
+                default => 'sent',
+            };
+            $statusClass = match ($effectiveStatus) {
+                'paid' => 'success',
+                'sent' => 'warning',
+                'partial' => 'info',
+                'overdue' => 'danger',
+                default => 'secondary',
+            };
+            $statusText = match ($effectiveStatus) {
+                'paid' => 'مدفوعة',
+                'sent' => 'مرسلة',
+                'partial' => 'مدفوعة جزئياً',
+                'overdue' => 'متأخرة',
+                default => 'مسودة',
+            };
+        @endphp
         <div class="list-card invoice-card">
             <div class="row align-items-center g-3">
                 <div class="col-md-3 mb-3 mb-md-0">
@@ -78,21 +101,6 @@
                     <small class="text-muted">المبلغ الإجمالي</small>
                 </div>
                 <div class="col-md-2 mb-3 mb-md-0">
-                    @php
-                        $statusClass = match ($invoice->status) {
-                            'paid' => 'success',
-                            'sent', 'partial' => 'warning',
-                            'overdue' => 'danger',
-                            default => 'secondary',
-                        };
-                        $statusText = match ($invoice->status) {
-                            'paid' => 'مدفوعة',
-                            'sent' => 'مرسلة',
-                            'partial' => 'مدفوعة جزئياً',
-                            'overdue' => 'متأخرة',
-                            default => 'مسودة',
-                        };
-                    @endphp
                     <span class="status-badge bg-{{ $statusClass }}">{{ $statusText }}</span>
                 </div>
                 <div class="col-md-2 text-start list-actions-col">

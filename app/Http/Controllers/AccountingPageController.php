@@ -70,7 +70,16 @@ class AccountingPageController extends Controller
 
         $invoices = Invoice::with('customer')
             ->where('company_id', $company->id)
-            ->when($statusFilter !== 'all', fn ($query) => $query->where('status', $statusFilter))
+            ->when($statusFilter !== 'all', function ($query) use ($statusFilter) {
+                return match ($statusFilter) {
+                    'draft' => $query->where('status', 'draft'),
+                    'sent' => $query->where('status', 'sent')->whereColumn('paid_amount', '<', 'total'),
+                    'paid' => $query->whereColumn('paid_amount', '>=', 'total'),
+                    'overdue' => $query->whereDate('due_date', '<', now()->toDateString())
+                        ->whereColumn('paid_amount', '<', 'total'),
+                    default => $query,
+                };
+            })
             ->orderBy('invoice_date', $sortDirection)
             ->orderBy('id', $sortDirection)
             ->get();
@@ -3979,8 +3988,54 @@ class AccountingPageController extends Controller
             ->map(function (Account $account) use ($accounts) {
                 $account->setRelation('children', $this->nestAccounts($accounts, $account->id));
 
+                // Calculate rolled-up balance including all descendants
+                $account->rolled_up_balance = $this->calculateRolledUpBalance($account, $accounts);
+
                 return $account;
             });
+    }
+
+    /**
+     * Calculate the rolled-up balance for an account including all descendants.
+     * For leaf accounts (no children), returns the account's own balance.
+     * For parent accounts, returns the sum of all descendant balances.
+     */
+    private function calculateRolledUpBalance(Account $account, Collection $allAccounts): float
+    {
+        $descendantBalances = $this->getDescendantBalances($account->id, $allAccounts);
+
+        // If this account has descendants with balances, sum them up
+        if (! empty($descendantBalances)) {
+            return array_sum($descendantBalances);
+        }
+
+        // Leaf account - return its own balance
+        return (float) $account->balance;
+    }
+
+    /**
+     * Recursively get all descendant account balances.
+     */
+    private function getDescendantBalances(?int $parentId, Collection $allAccounts): array
+    {
+        $balances = [];
+
+        $children = $allAccounts->where('parent_id', $parentId);
+
+        foreach ($children as $child) {
+            // Check if this child has its own children
+            $grandchildren = $allAccounts->where('parent_id', $child->id);
+
+            if ($grandchildren->isNotEmpty()) {
+                // Recursively get grandchildren balances
+                $balances = array_merge($balances, $this->getDescendantBalances($child->id, $allAccounts));
+            } else {
+                // Leaf node - include its balance
+                $balances[] = (float) $child->balance;
+            }
+        }
+
+        return $balances;
     }
 
     private function chartAccountRows(Collection $accounts): Collection
