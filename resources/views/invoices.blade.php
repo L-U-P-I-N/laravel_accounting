@@ -21,6 +21,8 @@
                 <i class="fas fa-chart-bar ms-1"></i> مركز التقارير
             </a>
         @endif
+
+        
         @if ($canManageInvoices)
             <a href="{{ route('invoices.create') }}" class="btn btn-gradient">
                 <i class="fas fa-plus ms-1"></i> إضافة مبيعات
