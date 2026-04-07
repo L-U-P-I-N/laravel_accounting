@@ -1,6 +1,6 @@
 @php
     $canManageAccounts = $canManageAccounts ?? auth()->user()->hasPermission('manage_accounts');
-    $typeText = $account->display_account_type ?: match ($account->account_type) {
+    $typeText = $account['display_account_type'] ?: match ($account['account_type']) {
         'asset' => 'أصول',
         'liability' => 'خصوم',
         'equity' => 'ملكية',
@@ -8,13 +8,24 @@
         'expense' => 'مصروفات',
         default => 'تكلفة',
     };
-    $nodeId = 'account-node-' . $account->id;
-    $childrenId = 'account-children-' . $account->id;
-    $hasChildren = $account->children->isNotEmpty();
-    $description = trim((string) $account->description);
-    // Use rolled-up balance for display (aggregates all descendant balances)
-    $displayBalance = $account->rolled_up_balance ?? (float) $account->balance;
-    $isParentWithChildren = $hasChildren && $displayBalance != (float) $account->balance;
+    $nodeId = 'account-node-' . $account['id'];
+    $childrenId = 'account-children-' . $account['id'];
+    
+    // Get children from shared view data
+    $flatAccounts = $chartAccountsLookup ?? [];
+    $children = [];
+    foreach ($flatAccounts as $id => $acc) {
+        if ($acc['parent_id'] === $account['id']) {
+            $children[] = $acc;
+        }
+    }
+    // Sort children by code
+    usort($children, fn($a, $b) => strcmp($a['code'], $b['code']));
+    $hasChildren = !empty($children);
+    
+    $description = trim((string) ($account['description'] ?? ''));
+    $displayBalance = $account['rolled_up_balance'] ?? (float) ($account['balance'] ?? 0);
+    $isParentWithChildren = $hasChildren && $displayBalance != (float) ($account['balance'] ?? 0);
 @endphp
 
 @once
@@ -240,7 +251,7 @@
 @endonce
 
 <div class="coa-node level-{{ $level }}" id="{{ $nodeId }}" style="--level: {{ $level }};">
-    <div class="coa-node-card {{ $account->account_type }}">
+    <div class="coa-node-card {{ $account['account_type'] }}">
         <div class="coa-node-main">
             <div class="coa-node-row">
                 <div class="coa-node-title-wrap">
@@ -252,23 +263,23 @@
                         <span class="coa-node-bullet"><i class="fas fa-circle" style="font-size: 8px;"></i></span>
                     @endif
                     <div class="flex-grow-1">
-                        <h3 class="coa-node-title">{{ $account->name }}</h3>
-                        @if ($account->name_ar && $account->name_ar !== $account->name)
-                            <div class="coa-node-subtitle">{{ $account->name_ar }}</div>
+                        <h3 class="coa-node-title">{{ $account['name'] }}</h3>
+                        @if (!empty($account['name_ar']) && $account['name_ar'] !== $account['name'])
+                            <div class="coa-node-subtitle">{{ $account['name_ar'] }}</div>
                         @endif
                         <div class="coa-node-meta">
                             <span class="coa-node-chip">
-                                <span class="coa-type-dot {{ $account->account_type }}"></span>
+                                <span class="coa-type-dot {{ $account['account_type'] }}"></span>
                                 {{ $typeText }}
                             </span>
-                            @if ($account->is_system)
+                            @if (!empty($account['is_system']))
                                 <span class="coa-node-chip"><i class="fas fa-shield-halved"></i> حساب نظام</span>
                             @endif
-                            @if ($account->allows_direct_transactions)
+                            @if (!empty($account['allows_direct_transactions']))
                                 <span class="coa-node-chip"><i class="fas fa-money-bill-transfer"></i> دفع/تحصيل مباشر</span>
                             @endif
                             @if ($hasChildren)
-                                <span class="coa-node-chip"><i class="fas fa-code-branch"></i> {{ $account->children->count() }} فروع</span>
+                                <span class="coa-node-chip"><i class="fas fa-code-branch"></i> {{ count($children) }} فروع</span>
                             @endif
                         </div>
                     </div>
@@ -276,7 +287,7 @@
 
                 <div class="coa-node-code">
                     <span class="coa-label">الكود</span>
-                    <span class="coa-value"><code>{{ $account->code }}</code></span>
+                    <span class="coa-value"><code>{{ $account['code'] }}</code></span>
                 </div>
 
                 <div class="coa-node-kind">
@@ -291,13 +302,13 @@
                     </span>
                     @if ($isParentWithChildren)
                         <small class="text-muted d-block" style="font-size: 0.75rem;">
-                            <i class="fas fa-layer-group me-1"></i>مجمع من {{ $account->children->count() }} حساب
+                            <i class="fas fa-layer-group me-1"></i>مجمع من {{ count($children) }} حساب
                         </small>
                     @endif
                 </div>
 
                 <div class="coa-node-actions">
-                    <a href="{{ route('chart_of_accounts.show', $account) }}" class="btn btn-sm btn-outline-primary" title="عرض تفاصيل الحساب">
+                    <a href="{{ route('chart_of_accounts.show', $account['id']) }}" class="btn btn-sm btn-outline-primary" title="عرض تفاصيل الحساب">
                         <i class="fas fa-eye ms-1"></i> عرض
                     </a>
                 </div>
@@ -311,7 +322,7 @@
         @if ($hasChildren)
             <div id="{{ $childrenId }}" class="coa-node-children collapse show">
                 <div class="coa-node-children-inner">
-                    @foreach ($account->children->sortBy('code') as $child)
+                    @foreach ($children as $child)
                         @include('partials.account_node', ['account' => $child, 'company' => $company, 'level' => $level + 1, 'canManageAccounts' => $canManageAccounts])
                     @endforeach
                 </div>

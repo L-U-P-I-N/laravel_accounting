@@ -1247,7 +1247,7 @@ class AccountingPageController extends Controller
         $parentOptions = $visibleAccounts->map(fn (Account $account) => [
             'id' => $account->id,
             'code' => $account->code,
-            'label' => $account->code . ' - ' . $account->full_name,
+            'label' => $account->code . ' - ' . ($account->name_ar ?: $account->name),
             'type' => $account->account_type,
         ])->values();
 
@@ -1329,12 +1329,15 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         abort_if((int) $account->company_id !== (int) $company->id, 404);
 
+        // Load all accounts for ancestors lookup
+        $allAccounts = Account::where('company_id', $company->id)->get();
+
         $account->load([
             'parent',
             'children' => fn ($query) => $query->orderBy('code'),
         ])->loadCount(['children', 'journalLines']);
 
-        $ancestors = $this->accountAncestors($account);
+        $ancestors = $this->accountAncestors($account, $allAccounts);
         $recentJournalLines = JournalLine::query()
             ->with(['journalEntry', 'account'])
             ->where('account_id', $account->id)
@@ -3905,7 +3908,7 @@ class AccountingPageController extends Controller
         })->values();
     }
 
-    private function buildAccountTree(Collection $accounts): Collection
+    private function buildAccountTree(Collection $accounts): array
     {
         return $this->nestAccounts($accounts, null);
     }
@@ -3943,13 +3946,16 @@ class AccountingPageController extends Controller
         return in_array($value, ['asc', 'desc'], true) ? $value : $default;
     }
 
-    private function accountAncestors(Account $account): Collection
+    private function accountAncestors(Account $account, Collection $allAccounts): Collection
     {
         $ancestors = collect();
+        $accountsById = $allAccounts->keyBy('id');
         $currentParentId = $account->parent_id;
+        $visited = [];
 
-        while ($currentParentId) {
-            $parent = Account::query()->find($currentParentId);
+        while ($currentParentId && !isset($visited[$currentParentId])) {
+            $visited[$currentParentId] = true;
+            $parent = $accountsById->get($currentParentId);
 
             if (! $parent) {
                 break;
@@ -3962,7 +3968,7 @@ class AccountingPageController extends Controller
         return $ancestors;
     }
 
-    private function buildFilteredAccountTree(Collection $allAccounts, Collection $matchingAccounts): Collection
+    private function buildFilteredAccountTree(Collection $allAccounts, Collection $matchingAccounts): array
     {
         $includedIds = [];
         $accountsById = $allAccounts->keyBy('id');
@@ -3979,63 +3985,56 @@ class AccountingPageController extends Controller
         return $this->nestAccounts($allAccounts->whereIn('id', array_keys($includedIds))->values(), null);
     }
 
-    private function nestAccounts(Collection $accounts, ?int $parentId): Collection
+    private function nestAccounts(Collection $accounts, ?int $parentId): array
     {
-        return $accounts
-            ->where('parent_id', $parentId)
-            ->sortBy('code')
-            ->values()
-            ->map(function (Account $account) use ($accounts) {
-                $account->setRelation('children', $this->nestAccounts($accounts, $account->id));
-
-                // Calculate rolled-up balance including all descendants
-                $account->rolled_up_balance = $this->calculateRolledUpBalance($account, $accounts);
-
-                return $account;
-            });
-    }
-
-    /**
-     * Calculate the rolled-up balance for an account including all descendants.
-     * For leaf accounts (no children), returns the account's own balance.
-     * For parent accounts, returns the sum of all descendant balances.
-     */
-    private function calculateRolledUpBalance(Account $account, Collection $allAccounts): float
-    {
-        $descendantBalances = $this->getDescendantBalances($account->id, $allAccounts);
-
-        // If this account has descendants with balances, sum them up
-        if (! empty($descendantBalances)) {
-            return array_sum($descendantBalances);
-        }
-
-        // Leaf account - return its own balance
-        return (float) $account->balance;
-    }
-
-    /**
-     * Recursively get all descendant account balances.
-     */
-    private function getDescendantBalances(?int $parentId, Collection $allAccounts): array
-    {
-        $balances = [];
-
-        $children = $allAccounts->where('parent_id', $parentId);
-
-        foreach ($children as $child) {
-            // Check if this child has its own children
-            $grandchildren = $allAccounts->where('parent_id', $child->id);
-
-            if ($grandchildren->isNotEmpty()) {
-                // Recursively get grandchildren balances
-                $balances = array_merge($balances, $this->getDescendantBalances($child->id, $allAccounts));
-            } else {
-                // Leaf node - include its balance
-                $balances[] = (float) $child->balance;
+        // Build flat array with just essential data - NO CHILDREN to avoid memory issues
+        $result = [];
+        foreach ($accounts as $account) {
+            // Only include accounts with matching parent_id
+            if ($account->parent_id === $parentId) {
+                $result[] = [
+                    'id' => $account->id,
+                    'code' => $account->code,
+                    'name' => $account->name,
+                    'name_ar' => $account->name_ar,
+                    'account_type' => $account->account_type,
+                    'display_account_type' => $account->display_account_type,
+                    'description' => $account->description,
+                    'balance' => (float) $account->balance,
+                    'parent_id' => $account->parent_id,
+                    'is_system' => $account->is_system,
+                    'allows_direct_transactions' => $account->allows_direct_transactions,
+                    'rolled_up_balance' => (float) $account->balance,
+                ];
             }
         }
-
-        return $balances;
+        
+        // Sort by code
+        usort($result, fn($a, $b) => strcmp($a['code'], $b['code']));
+        
+        // Build lookup for all accounts (for finding children in view)
+        $allAccountsById = [];
+        foreach ($accounts as $account) {
+            $allAccountsById[$account->id] = [
+                'id' => $account->id,
+                'code' => $account->code,
+                'name' => $account->name,
+                'name_ar' => $account->name_ar,
+                'account_type' => $account->account_type,
+                'display_account_type' => $account->display_account_type,
+                'description' => $account->description,
+                'balance' => (float) $account->balance,
+                'parent_id' => $account->parent_id,
+                'is_system' => $account->is_system,
+                'allows_direct_transactions' => $account->allows_direct_transactions,
+                'rolled_up_balance' => (float) $account->balance,
+            ];
+        }
+        
+        // Store in view shared data instead of session
+        view()->share('chartAccountsLookup', $allAccountsById);
+        
+        return $result;
     }
 
     private function chartAccountRows(Collection $accounts): Collection

@@ -483,7 +483,7 @@
         @endif
 
         <div class="coa-tree-canvas">
-            @forelse ($accounts->whereNull('parent_id') as $account)
+            @forelse ($accounts as $account)
                 @include('partials.account_node', ['account' => $account, 'company' => $company, 'level' => 0, 'canManageAccounts' => $canManageAccounts])
             @empty
                 <div class="coa-empty-state">
