@@ -1228,10 +1228,35 @@ class AccountingPageController extends Controller
     public function chartOfAccounts(Request $request): View
     {
         $company = $this->company($request);
+        
+        // Fetch all accounts for the company
         $allAccounts = Account::query()
             ->where('company_id', $company->id)
             ->orderBy('code')
             ->get();
+
+        // Fetch aggregated balances from journal_lines to ensure real-time accuracy
+        $balances = \App\Models\JournalLine::query()
+            ->join('journal_entries', 'journal_lines.journal_entry_id', '=', 'journal_entries.id')
+            ->where('journal_entries.company_id', $company->id)
+            ->where('journal_entries.status', 'posted')
+            ->select('account_id', \DB::raw('SUM(debit) as total_debit'), \DB::raw('SUM(credit) as total_credit'))
+            ->groupBy('account_id')
+            ->get()
+            ->keyBy('account_id');
+
+        // Update balances in the collection for this request
+        foreach ($allAccounts as $account) {
+            $balanceData = $balances->get($account->id);
+            $debit = $balanceData ? (float) $balanceData->total_debit : 0;
+            $credit = $balanceData ? (float) $balanceData->total_credit : 0;
+            
+            if (in_array($account->account_type, ['asset', 'expense', 'cogs'])) {
+                $account->balance = $debit - $credit;
+            } else {
+                $account->balance = $credit - $debit;
+            }
+        }
 
         $includeDynamicAccounts = $request->boolean('include_dynamic');
         $visibleAccounts = $this->visibleChartAccounts($allAccounts, $includeDynamicAccounts);
@@ -1239,9 +1264,12 @@ class AccountingPageController extends Controller
 
         $hasAccountFilters = $this->hasAccountFilters($accountFilters);
         $matchingAccounts = $this->filterAccounts($visibleAccounts, $accountFilters);
+        
+        // buildAccountTree and buildFilteredAccountTree use nestAccounts internally
         $accounts = $hasAccountFilters
             ? $this->buildFilteredAccountTree($visibleAccounts, $matchingAccounts)
             : $this->buildAccountTree($visibleAccounts);
+            
         $accountStats = $hasAccountFilters ? $matchingAccounts : $visibleAccounts;
 
         $parentOptions = $visibleAccounts->map(fn (Account $account) => [
