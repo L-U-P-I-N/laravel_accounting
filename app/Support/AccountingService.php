@@ -130,7 +130,9 @@ class AccountingService
         $purchase->loadMissing(['items.product', 'supplier.account', 'paymentAccount']);
 
         $lines = collect();
+        $totalDebit = 0.0;
 
+        // 1. Debit Side: Inventory or Expenses
         foreach ($purchase->items as $item) {
             $lineNet = $this->normalizeAmount((float) $item->total - (float) $item->tax_amount);
 
@@ -142,7 +144,7 @@ class AccountingService
                 $this->pushLine(
                     $lines,
                     $this->inventoryAccountForProduct($item->product, (int) $purchase->company_id),
-                    'إثبات قيمة المخزون لطلب الشراء ' . $purchase->purchase_number,
+                    'إثبات قيمة المخزون لطلب الشراء ' . $purchase->purchase_number . ' - ' . $item->product->name,
                     $lineNet,
                     0,
                 );
@@ -155,48 +157,31 @@ class AccountingService
                     0,
                 );
             }
+            $totalDebit += $lineNet;
         }
 
-        if ($lines->where('debit', '>', 0)->isEmpty() && (float) $purchase->subtotal > 0) {
-            $this->pushLine(
-                $lines,
-                $this->inventoryAccount((int) $purchase->company_id),
-                'إثبات قيمة المخزون لطلب الشراء ' . $purchase->purchase_number,
-                $this->normalizeAmount((float) $purchase->subtotal),
-                0,
-            );
-        }
-
-        if ((float) $purchase->tax_amount > 0) {
+        // 2. Debit Side: Tax
+        $taxAmount = $this->normalizeAmount((float) $purchase->tax_amount);
+        if ($taxAmount > 0) {
             $this->pushLine(
                 $lines,
                 $this->inputVatAccount((int) $purchase->company_id),
                 'ضريبة المدخلات لطلب الشراء ' . $purchase->purchase_number,
-                $this->normalizeAmount((float) $purchase->tax_amount),
+                $taxAmount,
                 0,
             );
+            $totalDebit += $taxAmount;
         }
 
-        $paidAmount = $this->normalizeAmount(min((float) $purchase->paid_amount, (float) $purchase->total));
-        $supplierDue = $this->normalizeAmount(max((float) $purchase->total - $paidAmount, 0));
-
-        if ($paidAmount > 0) {
+        // 3. Credit Side: Settlement Account (Bank/Cash or Supplier)
+        // We use the calculated totalDebit to ensure the entry is always balanced
+        if ($totalDebit > 0) {
             $this->pushLine(
                 $lines,
                 $this->settlementAccountForPurchase($purchase),
-                'السداد المباشر لطلب الشراء ' . $purchase->purchase_number,
+                'إثبات استحقاق/سداد طلب الشراء ' . $purchase->purchase_number,
                 0,
-                $paidAmount,
-            );
-        }
-
-        if ($supplierDue > 0) {
-            $this->pushLine(
-                $lines,
-                $this->supplierPayableAccount($purchase),
-                'إثبات التزام المورد ' . ($purchase->supplier?->name ?? ''),
-                0,
-                $supplierDue,
+                $totalDebit,
             );
         }
 
@@ -692,7 +677,7 @@ class AccountingService
             ?? $this->defaultSettlementAccount((int) $purchase->company_id);
     }
 
-    private function pushLine(Collection $lines, Account $account, string $description, float $debit, float $credit): void
+    private function pushLine(Collection $lines, $account, string $description, float $debit, float $credit): void
     {
         $debit = $this->normalizeAmount($debit);
         $credit = $this->normalizeAmount($credit);
@@ -701,8 +686,11 @@ class AccountingService
             return;
         }
 
+        // Handle both Account model and array from existing lines
+        $accountModel = $account instanceof Account ? $account : Account::find($account['id'] ?? $account->id);
+
         $lines->push([
-            'account' => $account,
+            'account' => $accountModel,
             'description' => $description,
             'debit' => $debit,
             'credit' => $credit,
