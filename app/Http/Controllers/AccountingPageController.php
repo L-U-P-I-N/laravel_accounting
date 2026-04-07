@@ -3987,6 +3987,9 @@ class AccountingPageController extends Controller
 
     private function nestAccounts(Collection $accounts, ?int $parentId): array
     {
+        // Pre-calculate all rolled_up_balances in one pass (bottom-up approach)
+        $rolledUpBalances = $this->calculateAllRolledUpBalances($accounts);
+        
         // Build flat array with just essential data - NO CHILDREN to avoid memory issues
         $result = [];
         foreach ($accounts as $account) {
@@ -4004,7 +4007,7 @@ class AccountingPageController extends Controller
                     'parent_id' => $account->parent_id,
                     'is_system' => $account->is_system,
                     'allows_direct_transactions' => $account->allows_direct_transactions,
-                    'rolled_up_balance' => (float) $account->balance,
+                    'rolled_up_balance' => $rolledUpBalances[$account->id] ?? (float) $account->balance,
                 ];
             }
         }
@@ -4027,7 +4030,7 @@ class AccountingPageController extends Controller
                 'parent_id' => $account->parent_id,
                 'is_system' => $account->is_system,
                 'allows_direct_transactions' => $account->allows_direct_transactions,
-                'rolled_up_balance' => (float) $account->balance,
+                'rolled_up_balance' => $rolledUpBalances[$account->id] ?? (float) $account->balance,
             ];
         }
         
@@ -4035,6 +4038,75 @@ class AccountingPageController extends Controller
         view()->share('chartAccountsLookup', $allAccountsById);
         
         return $result;
+    }
+
+    private function calculateAllRolledUpBalances(Collection $accounts): array
+    {
+        $accountsById = $accounts->keyBy('id');
+        $rolledUpBalances = [];
+        
+        // Initialize with own balance for each account
+        foreach ($accounts as $account) {
+            $rolledUpBalances[$account->id] = (float) $account->balance;
+        }
+        
+        // Build parent-child relationships
+        $childrenByParent = [];
+        foreach ($accounts as $account) {
+            if ($account->parent_id) {
+                if (!isset($childrenByParent[$account->parent_id])) {
+                    $childrenByParent[$account->parent_id] = [];
+                }
+                $childrenByParent[$account->parent_id][] = $account->id;
+            }
+        }
+        
+        // Calculate rolled-up balances bottom-up (from leaves to root)
+        // Process accounts in order from deepest to shallowest
+        $accountsByDepth = [];
+        foreach ($accounts as $account) {
+            $depth = $this->calculateDepth($account->id, $accountsById);
+            if (!isset($accountsByDepth[$depth])) {
+                $accountsByDepth[$depth] = [];
+            }
+            $accountsByDepth[$depth][] = $account->id;
+        }
+        
+        // Process from deepest to shallowest
+        krsort($accountsByDepth);
+        foreach ($accountsByDepth as $depth => $accountIds) {
+            foreach ($accountIds as $accountId) {
+                // Add this account's rolled-up balance to its parent
+                $account = $accountsById->get($accountId);
+                if ($account && $account->parent_id && isset($rolledUpBalances[$accountId])) {
+                    if (!isset($rolledUpBalances[$account->parent_id])) {
+                        $rolledUpBalances[$account->parent_id] = 0.0;
+                    }
+                    $rolledUpBalances[$account->parent_id] += $rolledUpBalances[$accountId];
+                }
+            }
+        }
+        
+        return $rolledUpBalances;
+    }
+
+    private function calculateDepth(int $accountId, Collection $accountsById): int
+    {
+        $depth = 0;
+        $current = $accountsById->get($accountId);
+        $visited = [];
+        
+        while ($current && !isset($visited[$current->id])) {
+            $visited[$current->id] = true;
+            if ($current->parent_id) {
+                $current = $accountsById->get($current->parent_id);
+                $depth++;
+            } else {
+                break;
+            }
+        }
+        
+        return $depth;
     }
 
     private function chartAccountRows(Collection $accounts): Collection
