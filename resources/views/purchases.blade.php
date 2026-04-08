@@ -54,9 +54,9 @@
                 </a>
             @endif
             @if ($canManagePurchases)
-                <button type="button" class="btn btn-gradient" data-bs-toggle="modal" data-bs-target="#addPurchaseModal">
+                <a href="{{ route('purchases.create') }}" class="btn btn-gradient">
                     <i class="fas fa-plus ms-1"></i> إنشاء طلب شراء
-                </button>
+                </a>
             @endif
         </div>
     </div>
@@ -238,9 +238,9 @@
                                                     <i class="fas fa-money-bill-wave"></i>
                                                 </button>
                                             @endif
-                                            <button type="button" class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editPurchaseModal{{ $purchase->id }}" title="تعديل الطلب">
+                                            <a href="{{ route('purchases.edit', $purchase) }}" class="btn btn-sm btn-warning" title="تعديل الطلب">
                                                 <i class="fas fa-edit"></i>
-                                            </button>
+                                            </a>
                                             @if (in_array($purchase->status, ['draft', 'pending'], true))
                                                 <form method="POST" action="{{ route('purchases.approve', $purchase) }}" class="d-inline">
                                                     @csrf
@@ -431,7 +431,7 @@
                                 <div class="row g-3">
                                     <div class="col-md-6">
                                         <label class="form-label">قيمة الدفعة</label>
-                                        <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $purchase->balance_due, 2, '.', '') }}" step="0.01" value="{{ $paymentPurchaseModalHasErrors ? old('payment_amount') : number_format((float) $purchase->balance_due, 2, '.', '') }}" required>
+                                        <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $purchase->balance_due, 2, '.', '') }}" step="0.01" value="{{ $paymentPurchaseModalHasErrors ? old('payment_amount') : number_format((float) $purchase->balance_due, 2, '.', '') }}" required lang="en" dir="ltr">
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">حساب السداد</label>
@@ -478,6 +478,7 @@
                         'description' => $description,
                         'quantity' => old('item_quantity.' . $index, 1),
                         'unit_price' => old('item_price.' . $index, 0),
+                        'cost_price' => old('item_cost_price.' . $index, 0),
                         'tax_rate' => old('item_tax_rate.' . $index, 0),
                     ];
                 }) : $purchase->items;
@@ -539,7 +540,7 @@
                                     </div>
                                     <div class="col-md-4" data-paid-amount-container>
                                         <label class="form-label">المبلغ المدفوع</label>
-                                        <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ $editPurchaseModalHasErrors ? old('paid_amount', number_format((float) $purchase->paid_amount, 2, '.', '')) : number_format((float) $purchase->paid_amount, 2, '.', '') }}" data-purchase-paid-amount>
+                                        <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ $editPurchaseModalHasErrors ? old('paid_amount', number_format((float) $purchase->paid_amount, 2, '.', '')) : number_format((float) $purchase->paid_amount, 2, '.', '') }}" data-purchase-paid-amount lang="en" dir="ltr">
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label">حساب السداد</label>
@@ -579,6 +580,7 @@
                                         <thead>
                                             <tr>
                                                 <th>المنتج</th>
+                                                <th>التكلفة</th>
                                                 <th>الوصف</th>
                                                 <th>الكمية</th>
                                                 <th>سعر البيع</th>
@@ -591,18 +593,20 @@
                                         <tbody data-purchase-items>
                                             @foreach ($itemsSource as $item)
                                                 <tr data-purchase-item-row>
-                                                    <td>
-                                                        <select name="item_product_id[]" class="form-select purchase-product-select">
-                                                            <option value="">اختر المنتج</option>
-                                                            @foreach ($products as $product)
-                                                                <option value="{{ $product->id }}" data-supplier-id="{{ $product->supplier_id ?? '' }}" data-description="{{ $product->description ?? '' }}" data-sell-price="{{ $product->sell_price ?? 0 }}" data-tax-rate="{{ $product->tax_rate ?? 0 }}" {{ (string) $item->product_id === (string) $product->id ? 'selected' : '' }}>{{ $product->name }}</option>
-                                                            @endforeach
-                                                        </select>
+                                                    <td style="position: relative;">
+                                                        <input type="hidden" name="item_product_id[]" class="purchase-product-id" value="{{ $item->product_id }}">
+                                                        <input type="text" name="item_product_name[]" class="form-control purchase-product-autocomplete"
+                                                               value="{{ $item->product_id ? ($products->firstWhere('id', $item->product_id)->name ?? '') : '' }}"
+                                                               placeholder="اكتب اسم المنتج..."
+                                                               autocomplete="off"
+                                                               data-products-json="{{ json_encode($products->map(fn($p) => ['id' => $p->id, 'name' => $p->name, 'description' => $p->description ?? '', 'cost_price' => $p->cost_price ?? 0, 'sell_price' => $p->sell_price ?? 0, 'tax_rate' => $p->tax_rate ?? 0])) }}">
+                                                        <div class="product-autocomplete-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #ddd; border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 1000;"></div>
                                                     </td>
+                                                    <td><input type="number" name="item_cost_price[]" class="form-control purchase-item-cost" min="0" step="0.01" value="{{ $item->cost_price ?? 0 }}" lang="en" dir="ltr"></td>
                                                     <td><input type="text" name="item_description[]" class="form-control purchase-item-description" value="{{ $item->description }}"></td>
-                                                    <td><input type="number" name="item_quantity[]" class="form-control purchase-item-quantity" min="0.01" step="0.01" value="{{ $item->quantity }}"></td>
-                                                    <td><input type="number" name="item_price[]" class="form-control purchase-item-price" min="0" step="0.01" value="{{ $item->unit_price }}"></td>
-                                                    <td><input type="number" name="item_tax_rate[]" class="form-control purchase-item-tax" min="0" max="100" step="0.01" value="{{ $item->tax_rate ?? 0 }}"></td>
+                                                    <td><input type="number" name="item_quantity[]" class="form-control purchase-item-quantity" min="0.01" step="0.01" value="{{ $item->quantity }}" lang="en" dir="ltr"></td>
+                                                    <td><input type="number" name="item_price[]" class="form-control purchase-item-price" min="0" step="0.01" value="{{ $item->unit_price }}" lang="en" dir="ltr"></td>
+                                                    <td><input type="number" name="item_tax_rate[]" class="form-control purchase-item-tax" min="0" max="100" step="0.01" value="{{ $item->tax_rate ?? 0 }}" lang="en" dir="ltr"></td>
                                                     <td><input type="text" class="form-control purchase-item-tax-amount" readonly></td>
                                                     <td><input type="text" class="form-control purchase-item-total" readonly></td>
                                                     <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-purchase-item><i class="fas fa-trash"></i></button></td>
@@ -689,7 +693,7 @@
                             </div>
                             <div class="col-md-4" data-paid-amount-container>
                                 <label class="form-label">المبلغ المدفوع</label>
-                                <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ old('paid_amount', '0') }}" data-purchase-paid-amount>
+                                <input type="number" name="paid_amount" class="form-control" min="0" step="0.01" value="{{ old('paid_amount', '0') }}" data-purchase-paid-amount lang="en" dir="ltr">
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">حساب السداد</label>
@@ -724,6 +728,7 @@
                                 <thead>
                                     <tr>
                                         <th>المنتج</th>
+                                        <th>التكلفة</th>
                                         <th>الوصف</th>
                                         <th>الكمية</th>
                                         <th>سعر البيع</th>
@@ -741,24 +746,27 @@
                                                 'description' => $description,
                                                 'quantity' => old('item_quantity.' . $index, 1),
                                                 'unit_price' => old('item_price.' . $index, 0),
+                                                'cost_price' => old('item_cost_price.' . $index, 0),
                                                 'tax_rate' => old('item_tax_rate.' . $index, 15),
                                             ];
                                         });
                                     @endphp
                                     @foreach ($createItems as $item)
                                         <tr data-purchase-item-row>
-                                            <td>
-                                                <select name="item_product_id[]" class="form-select purchase-product-select">
-                                                    <option value="">اختر المنتج</option>
-                                                    @foreach ($products as $product)
-                                                        <option value="{{ $product->id }}" data-supplier-id="{{ $product->supplier_id ?? '' }}" data-description="{{ $product->description ?? '' }}" data-sell-price="{{ $product->sell_price ?? 0 }}" data-tax-rate="{{ $product->tax_rate ?? 0 }}" {{ (string) $item->product_id === (string) $product->id ? 'selected' : '' }}>{{ $product->name }}</option>
-                                                    @endforeach
-                                                </select>
+                                            <td style="position: relative;">
+                                                <input type="hidden" name="item_product_id[]" class="purchase-product-id" value="{{ $item->product_id }}">
+                                                <input type="text" name="item_product_name[]" class="form-control purchase-product-autocomplete"
+                                                       value="{{ $item->product_id ? ($products->firstWhere('id', $item->product_id)->name ?? '') : '' }}"
+                                                       placeholder="اكتب اسم المنتج..."
+                                                       autocomplete="off"
+                                                       data-products-json="{{ json_encode($products->map(fn($p) => ['id' => $p->id, 'name' => $p->name, 'description' => $p->description ?? '', 'cost_price' => $p->cost_price ?? 0, 'sell_price' => $p->sell_price ?? 0, 'tax_rate' => $p->tax_rate ?? 0])) }}">
+                                                <div class="product-autocomplete-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #ddd; border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 1000;"></div>
                                             </td>
+                                            <td><input type="number" name="item_cost_price[]" class="form-control purchase-item-cost" min="0" step="0.01" value="{{ $item->cost_price ?? 0 }}" lang="en" dir="ltr"></td>
                                             <td><input type="text" name="item_description[]" class="form-control purchase-item-description" value="{{ $item->description }}"></td>
-                                            <td><input type="number" name="item_quantity[]" class="form-control purchase-item-quantity" min="0.01" step="0.01" value="{{ $item->quantity }}"></td>
-                                            <td><input type="number" name="item_price[]" class="form-control purchase-item-price" min="0" step="0.01" value="{{ $item->unit_price }}"></td>
-                                            <td><input type="number" name="item_tax_rate[]" class="form-control purchase-item-tax" min="0" max="100" step="0.01" value="{{ $item->tax_rate }}"></td>
+                                            <td><input type="number" name="item_quantity[]" class="form-control purchase-item-quantity" min="0.01" step="0.01" value="{{ $item->quantity }}" lang="en" dir="ltr"></td>
+                                            <td><input type="number" name="item_price[]" class="form-control purchase-item-price" min="0" step="0.01" value="{{ $item->unit_price }}" lang="en" dir="ltr"></td>
+                                            <td><input type="number" name="item_tax_rate[]" class="form-control purchase-item-tax" min="0" max="100" step="0.01" value="{{ $item->tax_rate }}" lang="en" dir="ltr"></td>
                                             <td><input type="text" class="form-control purchase-item-tax-amount" readonly></td>
                                             <td><input type="text" class="form-control purchase-item-total" readonly></td>
                                             <td><button type="button" class="btn btn-sm btn-outline-danger" data-remove-purchase-item><i class="fas fa-trash"></i></button></td>
@@ -853,61 +861,131 @@ function calculatePurchaseFormTotals(form) {
     }
 }
 
-function applySelectedPurchaseProduct(row, form) {
-    const select = row.querySelector('.purchase-product-select');
+function applySelectedPurchaseProduct(row, form, product) {
     const descriptionInput = row.querySelector('.purchase-item-description');
+    const costInput = row.querySelector('.purchase-item-cost');
     const priceInput = row.querySelector('.purchase-item-price');
     const taxInput = row.querySelector('.purchase-item-tax');
-    const supplierSelect = form.querySelector('.purchase-supplier-select');
 
-    if (!select) {
-        return;
-    }
-
-    const selectedOption = select.options[select.selectedIndex];
-
-    if (!selectedOption || !selectedOption.value) {
+    if (!product) {
         calculatePurchaseFormTotals(form);
         return;
     }
 
-    const productDescription = selectedOption.dataset.description || selectedOption.textContent.trim();
-    const productPrice = selectedOption.dataset.sellPrice || '';
-    const productTaxRate = selectedOption.dataset.taxRate || '0';
+    const currentCost = purchaseNumericValue(costInput?.value);
     const currentPrice = purchaseNumericValue(priceInput?.value);
     const currentTaxRate = purchaseNumericValue(taxInput?.value);
 
+    if (costInput && (!costInput.value || currentCost === 0 || costInput.dataset.autoFilled === 'true')) {
+        costInput.value = product.cost_price || '';
+        costInput.dataset.autoFilled = 'true';
+    }
+
     if (descriptionInput && (!descriptionInput.value || descriptionInput.dataset.autoFilled === 'true')) {
-        descriptionInput.value = productDescription;
+        descriptionInput.value = product.description || product.name;
         descriptionInput.dataset.autoFilled = 'true';
     }
 
     if (priceInput && (!priceInput.value || currentPrice === 0 || priceInput.dataset.autoFilled === 'true')) {
-        priceInput.value = productPrice;
+        priceInput.value = product.sell_price || '';
         priceInput.dataset.autoFilled = 'true';
     }
 
     if (taxInput && (!taxInput.value || currentTaxRate === 0 || taxInput.dataset.autoFilled === 'true')) {
-        taxInput.value = productTaxRate;
+        taxInput.value = product.tax_rate || '0';
         taxInput.dataset.autoFilled = 'true';
-    }
-
-    if (supplierSelect && selectedOption.dataset.supplierId) {
-        supplierSelect.value = selectedOption.dataset.supplierId;
     }
 
     calculatePurchaseFormTotals(form);
 }
 
 function bindPurchaseRow(row, form) {
-    const select = row.querySelector('.purchase-product-select');
+    const autocompleteInput = row.querySelector('.purchase-product-autocomplete');
+    const productIdInput = row.querySelector('.purchase-product-id');
+    const dropdown = row.querySelector('.product-autocomplete-dropdown');
+    const costInput = row.querySelector('.purchase-item-cost');
     const descriptionInput = row.querySelector('.purchase-item-description');
     const priceInput = row.querySelector('.purchase-item-price');
     const taxInput = row.querySelector('.purchase-item-tax');
-    const supplierSelect = form.querySelector('.purchase-supplier-select');
     const removeButton = row.querySelector('[data-remove-purchase-item]');
 
-    select?.addEventListener('change', () => applySelectedPurchaseProduct(row, form));
+    let products = [];
+    try {
+        products = JSON.parse(autocompleteInput?.dataset.productsJson || '[]');
+    } catch (e) {
+        products = [];
+    }
+
+    // Autocomplete functionality
+    if (autocompleteInput && dropdown) {
+        autocompleteInput.addEventListener('input', () => {
+            const query = autocompleteInput.value.trim().toLowerCase();
+            productIdInput.value = ''; // Clear product ID until selected
+
+            if (query.length < 1) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            const matches = products.filter(p => p.name.toLowerCase().includes(query));
+
+            if (matches.length > 0) {
+                dropdown.innerHTML = matches.map(p =>
+                    `<div class="product-suggestion" style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #eee;" data-product='${JSON.stringify(p)}'>
+                        ${p.name}
+                    </div>`
+                ).join('');
+                dropdown.style.display = 'block';
+
+                // Add click handlers
+                dropdown.querySelectorAll('.product-suggestion').forEach(suggestion => {
+                    suggestion.addEventListener('click', () => {
+                        const product = JSON.parse(suggestion.dataset.product);
+                        autocompleteInput.value = product.name;
+                        productIdInput.value = product.id;
+                        dropdown.style.display = 'none';
+                        applySelectedPurchaseProduct(row, form, product);
+                    });
+                });
+            } else {
+                dropdown.innerHTML = `<div style="padding: 8px 12px; color: #666;">لم يتم العثور على منتج - سيتم إنشاؤه عند الحفظ</div>`;
+                dropdown.style.display = 'block';
+            }
+        });
+
+        // Hide dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!autocompleteInput.contains(e.target) && !dropdown.contains(e.target)) {
+                dropdown.style.display = 'none';
+            }
+        });
+
+        // Show all products on focus
+        autocompleteInput.addEventListener('focus', () => {
+            if (autocompleteInput.value.trim() === '') {
+                dropdown.innerHTML = products.slice(0, 10).map(p =>
+                    `<div class="product-suggestion" style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #eee;" data-product='${JSON.stringify(p)}'>
+                        ${p.name}
+                    </div>`
+                ).join('');
+                if (products.length > 0) dropdown.style.display = 'block';
+
+                dropdown.querySelectorAll('.product-suggestion').forEach(suggestion => {
+                    suggestion.addEventListener('click', () => {
+                        const product = JSON.parse(suggestion.dataset.product);
+                        autocompleteInput.value = product.name;
+                        productIdInput.value = product.id;
+                        dropdown.style.display = 'none';
+                        applySelectedPurchaseProduct(row, form, product);
+                    });
+                });
+            }
+        });
+    }
+
+    costInput?.addEventListener('input', () => {
+        costInput.dataset.autoFilled = 'false';
+    });
 
     descriptionInput?.addEventListener('input', () => {
         descriptionInput.dataset.autoFilled = 'false';
@@ -935,8 +1013,12 @@ function bindPurchaseRow(row, form) {
         }
     });
 
-    if (select?.value) {
-        applySelectedPurchaseProduct(row, form);
+    // If product is already selected, apply its data
+    if (productIdInput?.value) {
+        const selectedProduct = products.find(p => String(p.id) === productIdInput.value);
+        if (selectedProduct) {
+            applySelectedPurchaseProduct(row, form, selectedProduct);
+        }
     } else if (priceInput?.value) {
         calculatePurchaseFormTotals(form);
     }
@@ -954,6 +1036,8 @@ function addPurchaseRow(form) {
     clone.querySelectorAll('input').forEach((input) => {
         if (input.classList.contains('purchase-item-quantity')) {
             input.value = '1';
+        } else if (input.classList.contains('purchase-item-cost')) {
+            input.value = '';
         } else if (input.classList.contains('purchase-item-tax')) {
             input.value = '15';
         } else if (input.classList.contains('purchase-item-tax-amount')) {
@@ -967,10 +1051,21 @@ function addPurchaseRow(form) {
         delete input.dataset.autoFilled;
     });
 
-    const select = clone.querySelector('.purchase-product-select');
-    if (select) {
-        select.value = '';
+    const productIdInput = clone.querySelector('.purchase-product-id');
+    const autocompleteInput = clone.querySelector('.purchase-product-autocomplete');
+    const dropdown = clone.querySelector('.product-autocomplete-dropdown');
+
+    if (productIdInput) productIdInput.value = '';
+    if (autocompleteInput) {
+        autocompleteInput.value = '';
+        // Copy products data to new row
+        const firstRowInput = firstRow.querySelector('.purchase-product-autocomplete');
+        if (firstRowInput) {
+            autocompleteInput.dataset.productsJson = firstRowInput.dataset.productsJson;
+        }
     }
+    if (dropdown) dropdown.style.display = 'none';
+    if (dropdown) dropdown.innerHTML = '';
 
     tbody.appendChild(clone);
     bindPurchaseRow(clone, form);

@@ -432,11 +432,11 @@
             </div>
             <div class="col-lg-2 col-md-6">
                 <label class="form-label">أقل رصيد</label>
-                <input type="number" step="0.01" name="min_balance" class="form-control" value="{{ $accountFilters['min_balance'] ?? '' }}" placeholder="0.00">
+                <input type="number" step="0.01" name="min_balance" class="form-control" value="{{ $accountFilters['min_balance'] ?? '' }}" placeholder="0.00" lang="en" dir="ltr">
             </div>
             <div class="col-lg-2 col-md-6">
                 <label class="form-label">أعلى رصيد</label>
-                <input type="number" step="0.01" name="max_balance" class="form-control" value="{{ $accountFilters['max_balance'] ?? '' }}" placeholder="0.00">
+                <input type="number" step="0.01" name="max_balance" class="form-control" value="{{ $accountFilters['max_balance'] ?? '' }}" placeholder="0.00" lang="en" dir="ltr">
             </div>
             <div class="col-lg-2 col-md-6 d-flex align-items-end">
                 <div class="form-check mb-2">

@@ -131,7 +131,7 @@
                                 @csrf
                                 @method('PUT')
                                 <div class="row g-3 mb-4">
-                                    <div class="col-md-4"><label class="form-label">ضريبة القيمة المضافة (%)</label><input type="number" name="vat_rate" class="form-control" min="0" max="100" step="0.01" value="{{ $defaultVatRate }}" required></div>
+                                    <div class="col-md-4"><label class="form-label">ضريبة القيمة المضافة (%)</label><input type="number" name="vat_rate" class="form-control" min="0" max="100" step="0.01" value="{{ $defaultVatRate }}" required lang="en" dir="ltr"></div>
                                     <div class="col-md-4"><label class="form-label">حساب ضريبة المخرجات</label><select name="output_tax_account_id" class="form-select" required>@foreach ($accounts->where('account_type', 'liability') as $account)<option value="{{ $account->id }}" {{ $selectedOutputTaxAccount === (int) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name }}</option>@endforeach</select></div>
                                     <div class="col-md-4"><label class="form-label">حساب ضريبة المدخلات</label><select name="input_tax_account_id" class="form-select" required>@foreach ($accounts->where('account_type', 'asset') as $account)<option value="{{ $account->id }}" {{ $selectedInputTaxAccount === (int) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name }}</option>@endforeach</select></div>
                                 </div>
@@ -164,9 +164,9 @@
                         <div class="card-header"><h5 class="mb-0">إعدادات الفواتير</h5></div>
                         <div class="card-body">
                             <div class="row g-3">
-                                <div class="col-md-6"><label class="form-label">بداية التسلسل</label><input type="number" class="form-control" value="1"></div>
+                                <div class="col-md-6"><label class="form-label">بداية التسلسل</label><input type="number" class="form-control" value="1" lang="en" dir="ltr"></div>
                                 <div class="col-md-6"><label class="form-label">البادئة</label><input type="text" class="form-control" value="INV-"></div>
-                                <div class="col-md-6"><label class="form-label">شروط الدفع بالأيام</label><input type="number" class="form-control" value="30"></div>
+                                <div class="col-md-6"><label class="form-label">شروط الدفع بالأيام</label><input type="number" class="form-control" value="30" lang="en" dir="ltr"></div>
                                 <div class="col-md-6"><label class="form-label">اللغة الافتراضية</label><input type="text" class="form-control" value="العربية"></div>
                                 <div class="col-12"><label class="form-label">ملاحظات الفاتورة</label><textarea class="form-control" rows="3"></textarea></div>
                             </div>

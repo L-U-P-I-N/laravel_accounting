@@ -184,7 +184,7 @@
             </div>
             <div class="col-md-3 mb-3 mb-md-0" data-paid-amount-wrapper>
                 <label class="form-label">المبلغ المدفوع</label>
-                <input type="number" name="paid_amount" class="form-control @error('paid_amount') is-invalid @enderror" value="{{ $paidAmountValue }}" min="0" step="0.01" data-paid-amount>
+                <input type="number" name="paid_amount" class="form-control @error('paid_amount') is-invalid @enderror" value="{{ $paidAmountValue }}" min="0" step="0.01" data-paid-amount lang="en" dir="ltr">
                 @error('paid_amount')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
             </div>
             <div class="col-md-3 mb-3 mb-md-0">
@@ -238,17 +238,17 @@
                             <div class="col-md-1">
                                 <label class="form-label">الكمية *</label>
                                 @php $quantityErrorKey = 'item_quantity.' . $loop->index; @endphp
-                                <input type="number" name="item_quantity[]" class="form-control invoice-item-quantity @error($quantityErrorKey) is-invalid @enderror" value="{{ $item->quantity }}" min="0.01" step="0.01" required>
+                                <input type="number" name="item_quantity[]" class="form-control invoice-item-quantity @error($quantityErrorKey) is-invalid @enderror" value="{{ $item->quantity }}" min="0.01" step="0.01" required lang="en" dir="ltr">
                                 @error($quantityErrorKey)<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
                                 <div class="form-text text-danger d-none" data-stock-feedback></div>
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">السعر *</label>
-                                <input type="number" name="item_price[]" class="form-control invoice-item-price" value="{{ $item->unit_price }}" min="0" step="0.01" required>
+                                <input type="number" name="item_price[]" class="form-control invoice-item-price" value="{{ $item->unit_price }}" min="0" step="0.01" required lang="en" dir="ltr">
                             </div>
                             <div class="col-md-1">
                                 <label class="form-label">الضريبة %</label>
-                                <input type="number" name="item_tax_rate[]" class="form-control invoice-item-tax" value="{{ $item->tax_rate }}" min="0" step="0.1">
+                                <input type="number" name="item_tax_rate[]" class="form-control invoice-item-tax" value="{{ $item->tax_rate }}" min="0" step="0.1" lang="en" dir="ltr">
                             </div>
                             <div class="col-md-1">
                                 <label class="form-label">الإجمالي</label>
@@ -297,7 +297,7 @@
                 </div>
                 <div class="col-md-3 mb-3 mb-md-0">
                     <label class="form-label">الخصم</label>
-                    <input type="number" id="discountAmount" class="form-control" value="0" min="0" step="0.01" disabled>
+                    <input type="number" id="discountAmount" class="form-control" value="0" min="0" step="0.01" disabled lang="en" dir="ltr">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">الإجمالي</label>

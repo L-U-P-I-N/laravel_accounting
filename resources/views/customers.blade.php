@@ -181,7 +181,7 @@
                                     </div>
                                     <div class="col-md-6"><label class="form-label">الدولة</label><input type="text" class="form-control" value="{{ $companyCountryLabel }}" readonly></div>
                                     <div class="col-md-6"><label class="form-label">الرقم الضريبي</label><input type="text" name="tax_number" class="form-control" value="{{ $editCustomerModalHasErrors ? old('tax_number') : $customer->tax_number }}"></div>
-                                    <div class="col-md-6"><label class="form-label">الحد الائتماني</label><input type="number" name="credit_limit" class="form-control" min="0" step="0.01" value="{{ $editCustomerModalHasErrors ? old('credit_limit') : $customer->credit_limit }}"></div>
+                                    <div class="col-md-6"><label class="form-label">الحد الائتماني</label><input type="number" name="credit_limit" class="form-control" min="0" step="0.01" value="{{ $editCustomerModalHasErrors ? old('credit_limit') : $customer->credit_limit }}" lang="en" dir="ltr"></div>
                                     <div class="col-12"><label class="form-label">العنوان</label><textarea name="address" class="form-control" rows="2">{{ $editCustomerModalHasErrors ? old('address') : $customer->address }}</textarea></div>
                                 </div>
                             </div>
@@ -249,7 +249,7 @@
                             </div>
                             <div class="col-md-6"><label class="form-label">الدولة</label><input type="text" class="form-control" value="{{ $companyCountryLabel }}" readonly></div>
                             <div class="col-md-6"><label class="form-label">الرقم الضريبي</label><input type="text" name="tax_number" class="form-control" value="{{ old('tax_number') }}"></div>
-                            <div class="col-md-6"><label class="form-label">الحد الائتماني</label><input type="number" name="credit_limit" class="form-control" min="0" step="0.01" value="{{ old('credit_limit', 0) }}"></div>
+                            <div class="col-md-6"><label class="form-label">الحد الائتماني</label><input type="number" name="credit_limit" class="form-control" min="0" step="0.01" value="{{ old('credit_limit', 0) }}" lang="en" dir="ltr"></div>
                             <div class="col-12"><label class="form-label">العنوان</label><textarea name="address" class="form-control" rows="2">{{ old('address') }}</textarea></div>
                         </div>
                     </div>

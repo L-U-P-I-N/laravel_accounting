@@ -195,8 +195,8 @@
                         </div>
                         <div class="col-md-6"><label class="form-label">حساب المصروف</label><select name="expense_account_id" class="form-select" required><option value="">اختر الحساب</option>@foreach ($expenseAccounts as $account)<option value="{{ $account->id }}" {{ (string) old('expense_account_id') === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>@endforeach</select></div>
                         <div class="col-md-6"><label class="form-label">حساب السداد</label><select name="payment_account_id" class="form-select" required><option value="">اختر الحساب</option>@foreach ($paymentAccounts as $account)<option value="{{ $account->id }}" {{ (string) old('payment_account_id') === (string) $account->id ? 'selected' : '' }}>{{ $account->code }} - {{ $account->name_ar ?? $account->name }}</option>@endforeach</select></div>
-                        <div class="col-md-4"><label class="form-label">المبلغ قبل الضريبة</label><input type="number" name="amount" class="form-control" min="0.01" step="0.01" value="{{ old('amount') }}" required></div>
-                        <div class="col-md-4"><label class="form-label">الضريبة %</label><input type="number" name="tax_rate" class="form-control" min="0" max="100" step="0.01" value="{{ old('tax_rate', 0) }}"></div>
+                        <div class="col-md-4"><label class="form-label">المبلغ قبل الضريبة</label><input type="number" name="amount" class="form-control" min="0.01" step="0.01" value="{{ old('amount') }}" required lang="en" dir="ltr"></div>
+                        <div class="col-md-4"><label class="form-label">الضريبة %</label><input type="number" name="tax_rate" class="form-control" min="0" max="100" step="0.01" value="{{ old('tax_rate', 0) }}" lang="en" dir="ltr"></div>
                         <div class="col-12"><label class="form-label">وصف المصروف</label><textarea name="description" class="form-control" rows="3">{{ old('description') }}</textarea></div>
                     </div>
                 </div>

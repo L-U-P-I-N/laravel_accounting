@@ -445,6 +445,40 @@ class AccountingPageController extends Controller
         return redirect()->route('purchases')->with('status', 'تم إنشاء طلب الشراء بنجاح.');
     }
 
+    public function createPurchase(Request $request): View
+    {
+        $company = $this->company($request);
+        $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get();
+        $products = Product::forCompany($company->id)->active()->orderBy('name')->get();
+        $paymentAccounts = $this->directPaymentAccounts($company->id);
+
+        return view('purchases.create', [
+            'company' => $company,
+            'suppliers' => $suppliers,
+            'products' => $products,
+            'paymentAccounts' => $paymentAccounts,
+        ]);
+    }
+
+    public function editPurchase(Request $request, Purchase $purchase): View
+    {
+        $company = $this->company($request);
+        abort_if((int) $purchase->company_id !== (int) $company->id, 404);
+
+        $purchase->load(['items.product', 'supplier', 'paymentAccount']);
+        $suppliers = Supplier::where('company_id', $company->id)->orderBy('name')->get();
+        $products = Product::forCompany($company->id)->active()->orderBy('name')->get();
+        $paymentAccounts = $this->directPaymentAccounts($company->id);
+
+        return view('purchases.edit', [
+            'company' => $company,
+            'purchase' => $purchase,
+            'suppliers' => $suppliers,
+            'products' => $products,
+            'paymentAccounts' => $paymentAccounts,
+        ]);
+    }
+
     public function updatePurchase(Request $request, Purchase $purchase): RedirectResponse
     {
         $company = $this->company($request);
@@ -1246,19 +1280,39 @@ class AccountingPageController extends Controller
             ->keyBy('account_id');
 
         // Update balances in the collection for this request
+        // حساب قيمة المخزون الحقيقية من المنتجات (الكمية × التكلفة)
+        $inventoryValueFromProducts = \App\Models\Product::query()
+            ->where('company_id', $company->id)
+            ->where('type', 'product')
+            ->selectRaw('SUM(stock_quantity * cost_price) as total_value')
+            ->value('total_value') ?? 0;
+
         foreach ($allAccounts as $account) {
-            $balanceData = $balances->get($account->id);
-            $debit = $balanceData ? (float) $balanceData->total_debit : 0;
-            $credit = $balanceData ? (float) $balanceData->total_credit : 0;
-            
-            if (in_array($account->account_type, ['asset', 'expense', 'cogs'])) {
-                $account->balance = $debit - $credit;
+            // للحساب الرئيسي للمخزون (1106)، استخدم قيمة المنتجات الحقيقية
+            if ($account->code === '1106') {
+                $account->balance = (float) $inventoryValueFromProducts;
             } else {
-                $account->balance = $credit - $debit;
+                $balanceData = $balances->get($account->id);
+                $debit = $balanceData ? (float) $balanceData->total_debit : 0;
+                $credit = $balanceData ? (float) $balanceData->total_credit : 0;
+                
+                if (in_array($account->account_type, ['asset', 'expense', 'cogs'])) {
+                    $account->balance = $debit - $credit;
+                } else {
+                    $account->balance = $credit - $debit;
+                }
             }
         }
 
         $includeDynamicAccounts = $request->boolean('include_dynamic');
+        
+        // حساب rolled_up_balance من جميع الحسابات (بما فيها الديناميكية) قبل الفلترة
+        // حتى يظهر رصيد الحسابات الرئيسية بشكل صحيح حتى لو كانت الحسابات الفرعية مخفية
+        $rolledUpBalances = $this->calculateAllRolledUpBalances($allAccounts);
+        foreach ($allAccounts as $account) {
+            $account->rolled_up_balance = $rolledUpBalances[$account->id] ?? (float) $account->balance;
+        }
+        
         $visibleAccounts = $this->visibleChartAccounts($allAccounts, $includeDynamicAccounts);
         $accountFilters = $this->chartAccountFilters($request);
 
@@ -4015,8 +4069,19 @@ class AccountingPageController extends Controller
 
     private function nestAccounts(Collection $accounts, ?int $parentId): array
     {
+        // استخدم rolled_up_balance المحسوب مسبقاً إذا كان موجوداً (من جميع الحسابات)
+        // وإلا احسبه من الحسابات الحالية
+        $preCalculatedBalances = [];
+        foreach ($accounts as $account) {
+            if (isset($account->rolled_up_balance)) {
+                $preCalculatedBalances[$account->id] = (float) $account->rolled_up_balance;
+            }
+        }
+        
         // Pre-calculate all rolled_up_balances in one pass (bottom-up approach)
-        $rolledUpBalances = $this->calculateAllRolledUpBalances($accounts);
+        $rolledUpBalances = !empty($preCalculatedBalances) 
+            ? $preCalculatedBalances 
+            : $this->calculateAllRolledUpBalances($accounts);
         
         // Build flat array with just essential data - NO CHILDREN to avoid memory issues
         $result = [];
@@ -5073,13 +5138,41 @@ class AccountingPageController extends Controller
 
         foreach ($validated['item_description'] as $index => $description) {
             $quantity = (float) ($validated['item_quantity'][$index] ?? 0);
+            $costPrice = (float) ($validated['item_cost_price'][$index] ?? 0);
             $unitPrice = (float) ($validated['item_price'][$index] ?? 0);
             $taxRate = (float) ($validated['item_tax_rate'][$index] ?? 0);
             $lineSubtotal = $quantity * $unitPrice;
             $lineTax = $lineSubtotal * ($taxRate / 100);
 
+            // تحديد المنتج: إذا تم اختياره أو البحث عنه/إنشاؤه بالاسم
+            $productId = $validated['item_product_id'][$index] ?? null;
+            $productName = $validated['item_product_name'][$index] ?? $description;
+
+            if (empty($productId) && !empty($productName)) {
+                // البحث عن منتج موجود بالاسم
+                $product = Product::where('company_id', $purchase->company_id)
+                    ->where('name', trim($productName))
+                    ->first();
+
+                if (!$product) {
+                    // إنشاء منتج جديد إذا لم يكن موجوداً
+                    $product = Product::create([
+                        'company_id' => $purchase->company_id,
+                        'name' => trim($productName),
+                        'code' => $this->generateProductCode($purchase->company_id),
+                        'type' => 'product',
+                        'cost_price' => $costPrice > 0 ? $costPrice : $unitPrice,
+                        'sell_price' => $unitPrice > 0 ? $unitPrice : ($costPrice * 1.3), // إذا سعر البيع غير محدد استخدم هامش 30%
+                        'stock_quantity' => 0,
+                        'is_active' => true,
+                    ]);
+                }
+
+                $productId = $product->id;
+            }
+
             $purchase->items()->create([
-                'product_id' => $validated['item_product_id'][$index] ?: null,
+                'product_id' => $productId,
                 'description' => $description,
                 'quantity' => $quantity,
                 'unit_price' => $unitPrice,
@@ -5088,6 +5181,21 @@ class AccountingPageController extends Controller
                 'total' => round($lineSubtotal + $lineTax, 2),
             ]);
         }
+    }
+
+    private function generateProductCode(int $companyId): string
+    {
+        $lastProduct = Product::where('company_id', $companyId)
+            ->where('code', 'like', 'PRD-%')
+            ->orderBy('id', 'desc')
+            ->first();
+
+        $lastNumber = 0;
+        if ($lastProduct && preg_match('/PRD-(\d+)/', $lastProduct->code, $matches)) {
+            $lastNumber = (int) $matches[1];
+        }
+
+        return 'PRD-' . str_pad($lastNumber + 1, 4, '0', STR_PAD_LEFT);
     }
 
     private function normalizeJournalLines(array $validated, int $companyId): array

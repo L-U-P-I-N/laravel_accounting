@@ -44,6 +44,8 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
 
     Route::middleware('permission:manage_purchases')->group(function () {
         Route::get('/purchases', [AccountingPageController::class, 'purchases'])->name('purchases');
+        Route::get('/purchases/create', [AccountingPageController::class, 'createPurchase'])->name('purchases.create');
+        Route::get('/purchases/{purchase}/edit', [AccountingPageController::class, 'editPurchase'])->name('purchases.edit');
         Route::get('/purchases/{purchase}/attachment', [AccountingPageController::class, 'showPurchaseAttachment'])->name('purchases.attachment');
         Route::post('/purchases', [AccountingPageController::class, 'storePurchase'])->name('purchases.store');
         Route::post('/purchases/{purchase}/payments', [AccountingPageController::class, 'storePurchasePayment'])->name('purchases.payments.store');

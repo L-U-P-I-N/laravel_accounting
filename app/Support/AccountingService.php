@@ -55,15 +55,16 @@ class AccountingService
         $cogsDebitTotal = 0.0;
 
         foreach ($invoice->items as $item) {
-            $lineNet = $this->normalizeAmount((float) $item->total - (float) $item->tax_amount);
+            // حساب سعر البيع بدون ضريبة = الكمية × سعر الوحدة
+            $sellingPrice = $this->normalizeAmount((float) $item->quantity * (float) $item->unit_price);
 
-            if ($lineNet > 0) {
+            if ($sellingPrice > 0) {
                 $this->pushLine(
                     $lines,
                     $this->revenueAccountForProduct($item->product, (int) $invoice->company_id),
-                    'إثبات الإيراد للفاتورة ' . $invoice->invoice_number,
+                    'إثبات الإيراد للفاتورة ' . $invoice->invoice_number . ' - ' . ($item->product?->name ?? ''),
                     0,
-                    $lineNet,
+                    $sellingPrice,
                 );
             }
 

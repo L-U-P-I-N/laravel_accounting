@@ -84,7 +84,7 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">الراتب</label>
-                            <input type="number" name="salary" class="form-control" min="0" step="0.01" value="{{ $salaryValue }}">
+                            <input type="number" name="salary" class="form-control" min="0" step="0.01" value="{{ $salaryValue }}" lang="en" dir="ltr">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">تاريخ التوظيف</label>

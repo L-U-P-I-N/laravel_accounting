@@ -132,11 +132,11 @@
                             </div>
                             <div class="col-md-2 mb-3 mb-md-0">
                                 <label class="form-label">مدين</label>
-                                <input type="number" name="line_debit[]" class="form-control line-debit" value="{{ $line->debit }}" min="0" step="0.01">
+                                <input type="number" name="line_debit[]" class="form-control line-debit" value="{{ $line->debit }}" min="0" step="0.01" lang="en" dir="ltr">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">دائن</label>
-                                <input type="number" name="line_credit[]" class="form-control line-credit" value="{{ $line->credit }}" min="0" step="0.01">
+                                <input type="number" name="line_credit[]" class="form-control line-credit" value="{{ $line->credit }}" min="0" step="0.01" lang="en" dir="ltr">
                                 <button type="button" class="btn btn-sm btn-outline-danger mt-2 remove-line w-100"><i class="fas fa-trash"></i></button>
                             </div>
                         </div>

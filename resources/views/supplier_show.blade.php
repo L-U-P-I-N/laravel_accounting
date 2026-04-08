@@ -233,7 +233,7 @@
                     </div>
 
                     <label class="form-label">مبلغ الدفع</label>
-                    <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $supplier->balance, 2, '.', '') }}" step="0.01" value="{{ old('payment_amount') }}" required>
+                    <input type="number" name="payment_amount" class="form-control" min="0.01" max="{{ number_format((float) $supplier->balance, 2, '.', '') }}" step="0.01" value="{{ old('payment_amount') }}" required lang="en" dir="ltr">
                     <label class="form-label mt-3">حساب السداد</label>
                     <select name="payment_account_id" class="form-select" required>
                         <option value="">اختر الحساب</option>
