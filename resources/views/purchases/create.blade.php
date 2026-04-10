@@ -572,10 +572,10 @@ function calculatePurchaseTotals(form) {
 
     form.querySelectorAll('[data-purchase-item-row]').forEach(row => {
         const quantity = parseFloat(row.querySelector('.purchase-item-quantity')?.value) || 0;
-        const price = parseFloat(row.querySelector('.purchase-item-price')?.value) || 0;
+        const cost = parseFloat(row.querySelector('.purchase-item-cost')?.value) || 0;
         const taxRate = parseFloat(row.querySelector('.purchase-item-tax')?.value) || 0;
 
-        const lineSubtotal = quantity * price;
+        const lineSubtotal = quantity * cost;
         const lineTax = lineSubtotal * (taxRate / 100);
         const lineTotal = lineSubtotal + lineTax;
 

@@ -124,7 +124,7 @@
                                 <tr>
                                     <td>{{ $child->code }}</td>
                                     <td>{{ $child->name_ar ?: $child->name }}</td>
-                                    <td>{{ number_format((float) $child->balance, 2) }} {{ $company->currency }}</td>
+                                    <td>{{ number_format((float) ($child->rolled_up_balance ?? $child->balance), 2) }} {{ $company->currency }}</td>
                                     <td>
                                         <a href="{{ route('chart_of_accounts.show', $child) }}" class="btn btn-sm btn-outline-primary">
                                             <i class="fas fa-eye ms-1"></i> عرض
