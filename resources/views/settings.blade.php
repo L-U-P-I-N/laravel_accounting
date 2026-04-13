@@ -59,10 +59,32 @@
                     <div class="list-card">
                         <div class="card-header"><h5 class="mb-0">معلومات الشركة</h5></div>
                         <div class="card-body">
-                            <form method="POST" action="{{ route('settings.company.update') }}" id="companySettingsForm">
+                            <form method="POST" action="{{ route('settings.company.update') }}" id="companySettingsForm" enctype="multipart/form-data">
                                 @csrf
                                 @method('PUT')
                                 <div class="row g-3">
+                                    <div class="col-md-12">
+                                        <label class="form-label">شعار الشركة</label>
+                                        <div class="d-flex align-items-center gap-3">
+                                            @if($company->logo_url)
+                                                <img src="{{ asset('storage/' . $company->logo_url) }}" alt="Company Logo" style="height: 60px; max-width: 200px; object-fit: contain;">
+                                            @else
+                                                <div class="bg-light d-flex align-items-center justify-content-center" style="height: 60px; width: 60px; border-radius: 8px;">
+                                                    <i class="bi bi-building text-muted fs-3"></i>
+                                                </div>
+                                            @endif
+                                            <div>
+                                                <input type="file" name="logo" class="form-control" accept="image/*">
+                                                <small class="text-muted">الصيغ المسموحة: JPG, PNG, GIF. الحد الأقصى: 2MB</small>
+                                            </div>
+                                            @if($company->logo_url)
+                                                <div class="form-check">
+                                                    <input type="checkbox" name="remove_logo" class="form-check-input" id="removeLogo">
+                                                    <label class="form-check-label" for="removeLogo">إزالة الشعار</label>
+                                                </div>
+                                            @endif
+                                        </div>
+                                    </div>
                                     <div class="col-md-6"><label class="form-label">اسم الشركة</label><input type="text" name="name" class="form-control" value="{{ old('name', $company->name) }}" required></div>
                                     <div class="col-md-6"><label class="form-label">الرقم الضريبي</label><input type="text" name="tax_number" class="form-control" value="{{ old('tax_number', $company->tax_number) }}"></div>
                                     <div class="col-md-6"><label class="form-label">البريد الإلكتروني</label><input type="email" name="email" class="form-control" value="{{ old('email', $company->email) }}"></div>

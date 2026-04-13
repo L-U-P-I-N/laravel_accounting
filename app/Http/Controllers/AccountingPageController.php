@@ -3058,7 +3058,7 @@ class AccountingPageController extends Controller
 
         $countryConfig = $this->countryConfigs()->get($validated['country_code'], $this->countryConfigs()->get('SA'));
 
-        $company->update([
+        $updateData = [
             'name' => $validated['name'],
             'tax_number' => $validated['tax_number'] ?? null,
             'email' => $validated['email'] ?? null,
@@ -3067,7 +3067,28 @@ class AccountingPageController extends Controller
             'city' => $validated['city'] ?? null,
             'country_code' => $validated['country_code'],
             'currency' => $validated['currency'] ?? ($countryConfig['currency'] ?? $company->currency),
-        ]);
+        ];
+
+        // Handle logo upload
+        if ($request->hasFile('logo')) {
+            // Delete old logo if exists
+            if ($company->logo_url && Storage::disk('public')->exists($company->logo_url)) {
+                Storage::disk('public')->delete($company->logo_url);
+            }
+            
+            $logoPath = $request->file('logo')->store('company-logos', 'public');
+            $updateData['logo_url'] = $logoPath;
+        }
+
+        // Handle logo removal
+        if ($request->boolean('remove_logo')) {
+            if ($company->logo_url && Storage::disk('public')->exists($company->logo_url)) {
+                Storage::disk('public')->delete($company->logo_url);
+            }
+            $updateData['logo_url'] = null;
+        }
+
+        $company->update($updateData);
 
         return redirect()->route('settings')->with('status', 'تم تحديث معلومات الشركة بنجاح.');
     }
@@ -3803,6 +3824,7 @@ class AccountingPageController extends Controller
             'country_code' => ['required', Rule::in($countries->keys()->all())],
             'city' => ['nullable', 'string', 'max:100'],
             'currency' => ['nullable', 'string', 'max:10'],
+            'logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,gif,webp', 'max:2048'],
         ]);
 
         $allowedCities = $this->cityOptionsForCountryCode($validated['country_code']);

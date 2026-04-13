@@ -35,6 +35,9 @@
     <section class="layout">
         <div class="card" style="flex:1">
             <h3>بيانات الشركة</h3>
+            @if($company->logo_url)
+                <img src="{{ $company->logoUrl() }}" alt="{{ $company->name }}" style="max-height: 60px; max-width: 150px; object-fit: contain; margin-bottom: 10px;">
+            @endif
             <p>الاسم: {{ $company->name }}</p>
             <p>المدينة: {{ $company->city ?: '-' }}</p>
             <p>الدولة: {{ $companyCountry }}</p>

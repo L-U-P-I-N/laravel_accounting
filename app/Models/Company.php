@@ -92,4 +92,9 @@ class Company extends Model
     {
         return $this->hasMany(TaxSetting::class);
     }
+
+    public function logoUrl(): ?string
+    {
+        return $this->logo_url ? asset('storage/' . $this->logo_url) : null;
+    }
 }

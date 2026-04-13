@@ -59,6 +59,9 @@
     <div class="invoice-header">
         <div class="row">
             <div class="col-md-6 mb-4 mb-md-0">
+                @if($company->logo_url)
+                    <img src="{{ $company->logoUrl() }}" alt="{{ $company->name }}" style="max-height: 80px; max-width: 200px; object-fit: contain; margin-bottom: 15px;">
+                @endif
                 <h3>{{ $company->name }}</h3>
                 <p class="text-muted mb-1">{{ trim(($company->address ?? '') . ' ' . ($company->city ?? '')) }}</p>
                 <p class="text-muted mb-1">{{ $company->phone }} @if($company->email) • {{ $company->email }} @endif</p>

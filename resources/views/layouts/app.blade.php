@@ -13,10 +13,15 @@
 </head>
 <body>
     @php($currentUser = request()->user())
+    @php($currentCompany = auth()->user()?->company ?? \App\Models\Company::first())
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <i class="fas fa-chart-line"></i>
-            <span class="sidebar-brand">المحاسبة المتقدمة</span>
+            @if($currentCompany?->logo_url)
+                <img src="{{ $currentCompany->logoUrl() }}" alt="{{ $currentCompany->name }}" style="height: 40px; max-width: 180px; object-fit: contain;">
+            @else
+                <i class="fas fa-chart-line"></i>
+                <span class="sidebar-brand">المحاسبة المتقدمة</span>
+            @endif
         </div>
 
         <nav class="sidebar-nav">
@@ -112,6 +117,13 @@
             <button type="button" class="btn btn-link sidebar-toggle" onclick="toggleSidebar()" aria-label="فتح القائمة الجانبية">
                 <i class="fas fa-bars"></i>
             </button>
+            
+            @if($currentCompany?->logo_url)
+                {{-- Mobile logo only shown on small screens --}}
+                <div class="d-lg-none ms-3">
+                    <img src="{{ $currentCompany->logoUrl() }}" alt="{{ $currentCompany->name }}" style="height: 32px; max-width: 120px; object-fit: contain;">
+                </div>
+            @endif
 
             <div class="top-nav-right">
                 <div class="dropdown">
