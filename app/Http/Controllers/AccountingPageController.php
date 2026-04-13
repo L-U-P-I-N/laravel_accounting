@@ -2042,6 +2042,7 @@ class AccountingPageController extends Controller
             'product_performance' => ['section' => 'inventory', 'icon' => 'fa-chart-line', 'title' => 'تقرير أداء المنتج', 'description' => 'عرض مبيعات كل منتج في النظام على حدة حتى تتمكن من معرفة المنتجات الأفضل أداءاً والأكثر تحقيقاً للأرباح.', 'query_preview' => "SELECT p.name, SUM(ii.quantity) AS qty, SUM(ii.total) AS sales, SUM((ii.price - p.cost_price) * ii.quantity) AS profit\nFROM products p\nJOIN invoice_items ii ON ii.product_id = p.id\nJOIN invoices i ON i.id = ii.invoice_id\nWHERE i.company_id = ? AND i.status = 'completed'\nGROUP BY p.id;"],
             'product_movements' => ['section' => 'inventory', 'icon' => 'fa-dolly', 'title' => 'حركة المنتجات', 'description' => 'تعرف على حركة منتجات مخزونك علماً بانها يتم ادراجها في تقارير المخزون.', 'query_preview' => "SELECT sm.created_at, p.name, sm.type, sm.quantity, sm.reference_type, w.name AS warehouse\nFROM stock_movements sm\nJOIN products p ON p.id = sm.product_id\nLEFT JOIN warehouses w ON w.id = sm.warehouse_id\nWHERE sm.company_id = ?\nORDER BY sm.created_at DESC;"],
             'tax_summary_live' => ['section' => 'taxes', 'icon' => 'fa-file-invoice', 'title' => 'ملخص الضرائب', 'description' => 'عرض صافي ضريبة المخرجات والمدخلات خلال الفترة بشكل لحظي.', 'query_preview' => "SELECT SUM(tax_amount) FROM invoices UNION ALL SELECT SUM(tax_amount) FROM purchases;"],
+            'tax_return' => ['section' => 'taxes', 'icon' => 'fa-file-contract', 'title' => 'الإقرار الضريبي', 'description' => 'ملخص شامل لكل ما يتعلق بالضرائب في النظام، يساعدك على البقاء متوافقا مع متطلبات هيئة الزكاة والدخل والإفصاح عن تقريرك الضريبي بكل سهولة.', 'query_preview' => "SELECT tax_type, SUM(tax_amount) AS tax\nFROM invoices\nWHERE company_id = ? AND status = 'completed'\nGROUP BY tax_type;\n\nSELECT tax_type, SUM(tax_amount) AS tax\nFROM purchases\nWHERE company_id = ? AND status = 'completed'\nGROUP BY tax_type;"],
             'tax_output_by_invoice' => ['section' => 'taxes', 'icon' => 'fa-receipt', 'title' => 'الضريبة من كل فاتورة', 'description' => 'متابعة ضريبة المخرجات على مستوى كل فاتورة مبيعات.', 'query_preview' => "SELECT invoice_number, tax_amount, total\nFROM invoices\nWHERE company_id = ? AND tax_amount > 0\nORDER BY invoice_date DESC;"],
             'tax_input_by_supplier' => ['section' => 'taxes', 'icon' => 'fa-truck-ramp-box', 'title' => 'ضريبة المشتريات حسب المورد', 'description' => 'تجميع ضريبة المدخلات من المشتريات بحسب المورد لتسهيل التسويات الضريبية.', 'query_preview' => "SELECT suppliers.name, SUM(purchases.tax_amount) AS input_tax\nFROM purchases\nINNER JOIN suppliers ON suppliers.id = purchases.supplier_id\nWHERE purchases.company_id = ?\nGROUP BY suppliers.id, suppliers.name;"],
             'warehouse_coverage' => ['section' => 'warehouse', 'icon' => 'fa-ruler-combined', 'title' => 'تغطية المخزون مقابل الحد الأدنى', 'description' => 'قياس الجاهزية التشغيلية لكل منتج بمقارنة الرصيد الحالي بالحد الأدنى.', 'query_preview' => "SELECT name, stock_quantity, min_stock\nFROM products\nWHERE company_id = ?\nORDER BY (stock_quantity - min_stock) ASC;"],
@@ -2105,6 +2106,7 @@ class AccountingPageController extends Controller
             'low_stock_alerts' => $this->lowStockAlertsInteractiveReport($company),
             'sales_velocity' => $this->salesVelocityInteractiveReport($company, $dateFrom, $dateTo),
             'tax_summary_live' => $this->interactiveFromLegacy($this->taxSummaryReport($company, $dateFrom, $dateTo)),
+            'tax_return' => $this->taxReturnInteractiveReport($company, $dateFrom, $dateTo),
             'tax_output_by_invoice' => $this->taxOutputByInvoiceInteractiveReport($company, $dateFrom, $dateTo),
             'tax_input_by_supplier' => $this->taxInputBySupplierInteractiveReport($company, $dateFrom, $dateTo),
             'warehouse_coverage' => $this->warehouseCoverageInteractiveReport($company),
@@ -2808,6 +2810,86 @@ class AccountingPageController extends Controller
             ->map(fn ($row) => ['label' => $row->label, 'meta' => 'عدد المشتريات: ' . $row->purchase_count, 'value' => (float) $row->tax_total]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد ضرائب مشتريات مجمعة حسب المورد خلال الفترة المحددة.');
+    }
+
+    private function taxReturnInteractiveReport(Company $company, Carbon $dateFrom, Carbon $dateTo): array
+    {
+        // Sales (Output Tax)
+        $outputVat = (float) Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('tax_amount');
+
+        $outputVat15 = (float) Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->where('tax_type', 'vat_15')
+            ->sum('tax_amount');
+
+        $outputZero = (float) Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->where('tax_type', 'vat_0')
+            ->sum('total');
+
+        $outputExempt = (float) Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->where('tax_type', 'exempt')
+            ->sum('total');
+
+        $totalSales = (float) Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('total');
+
+        // Purchases (Input Tax)
+        $inputVat = (float) Purchase::where('company_id', $company->id)
+            ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('tax_amount');
+
+        $inputVat15 = (float) Purchase::where('company_id', $company->id)
+            ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->where('tax_type', 'vat_15')
+            ->sum('tax_amount');
+
+        $totalPurchases = (float) Purchase::where('company_id', $company->id)
+            ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->sum('total');
+
+        // Calculate net tax
+        $netTax = $outputVat - $inputVat;
+
+        // Count documents
+        $salesCount = Invoice::where('company_id', $company->id)
+            ->whereIn('status', ['sent', 'partial', 'paid'])
+            ->whereBetween('invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->count();
+
+        $purchaseCount = Purchase::where('company_id', $company->id)
+            ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
+            ->count();
+
+        return [
+            'type' => 'tax_return',
+            'title' => 'الإقرار الضريبي',
+            'period' => $dateFrom->format('Y-m-d') . ' - ' . $dateTo->format('Y-m-d'),
+            'summary' => [
+                'output_vat_15' => $outputVat15,
+                'output_vat_total' => $outputVat,
+                'output_zero_rated' => $outputZero,
+                'output_exempt' => $outputExempt,
+                'total_sales' => $totalSales,
+                'input_vat_15' => $inputVat15,
+                'input_vat_total' => $inputVat,
+                'total_purchases' => $totalPurchases,
+                'net_tax_payable' => $netTax,
+                'sales_documents' => $salesCount,
+                'purchase_documents' => $purchaseCount,
+            ],
+            'rows' => [],
+            'empty_message' => 'لا توجد بيانات ضريبية للفترة المحددة.',
+        ];
     }
 
     private function warehouseCoverageInteractiveReport(Company $company): array
