@@ -28,6 +28,7 @@ use App\Support\DocumentNumberGenerator;
 use App\Support\InventoryMovementService;
 use App\Support\PaymentSyncService;
 use App\Support\ReferenceGenerator;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -2073,7 +2074,6 @@ class AccountingPageController extends Controller
             'finance_expenses' => 'expense_details',
             'finance_receivables', 'customer_statement' => 'receivables',
             'finance_payables', 'warehouse_suppliers', 'warehouse_incoming' => 'payables',
-            default => null,
             default => 'income_statement',
         };
     }
@@ -3215,6 +3215,61 @@ class AccountingPageController extends Controller
         );
 
         return redirect()->route('settings', ['#tax-settings'])->with('status', 'تم تحديث ربط الحسابات الضريبية بنجاح.');
+    }
+
+    public function downloadBackup(Request $request): JsonResponse
+    {
+        $company = $this->company($request);
+        
+        try {
+            // Create backup filename
+            $filename = 'backup_' . $company->id . '_' . date('Y-m-d_H-i-s') . '.sql';
+            
+            // Create backup using mysqldump
+            $database = config('database.connections.mysql.database');
+            $username = config('database.connections.mysql.username');
+            $password = config('database.connections.mysql.password');
+            $host = config('database.connections.mysql.host');
+            
+            $command = "mysqldump --user={$username} --password={$password} --host={$host} {$database} > {$filename}";
+            
+            // Execute backup command
+            $output = [];
+            $returnCode = 0;
+            exec($command, $output, $returnCode);
+            
+            if ($returnCode === 0 && file_exists($filename)) {
+                // Send email with backup
+                $companyEmail = $company->email ?? 'skjccm@gmail.com';
+                
+                Mail::raw('تم إنشاء نسخة احتياطية لشركة ' . $company->name, function ($message) use ($filename, $companyEmail, $company) {
+                    $message->to($companyEmail)
+                        ->subject('نسخة احتياطية - ' . $company->name)
+                        ->attach($filename, [
+                            'as' => basename($filename),
+                            'mime' => 'application/octet-stream'
+                        ]);
+                });
+                
+                // Clean up temporary file
+                unlink($filename);
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'تم إرسال النسخة الاحتياطية إلى بريدك الإلكتروني بنجاح'
+                ]);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'فشل إنشاء النسخة الاحتياطية'
+                ], 500);
+            }
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'حدث خطأ: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     private function resolveReportRange(string $period, ?string $dateFrom, ?string $dateTo): array

@@ -130,6 +130,7 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
         Route::get('/settings', [AccountingPageController::class, 'settings'])->name('settings');
         Route::put('/settings/company', [AccountingPageController::class, 'updateCompanySettings'])->name('settings.company.update');
         Route::put('/settings/taxes', [AccountingPageController::class, 'updateTaxSettings'])->name('settings.taxes.update');
+        Route::post('/settings/backup', [AccountingPageController::class, 'downloadBackup'])->name('settings.backup');
     });
 
     Route::middleware('permission:manage_users')->group(function () {

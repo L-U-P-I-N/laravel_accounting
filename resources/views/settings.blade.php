@@ -205,7 +205,7 @@
                                 <div class="col-md-6 mb-4 mb-md-0">
                                     <h6>نسخ احتياطي يدوي</h6>
                                     <p>قم بتنزيل نسخة احتياطية كاملة من بياناتك</p>
-                                    <button type="button" class="btn btn-primary" disabled><i class="fas fa-download ms-2"></i>إنشاء نسخة احتياطية</button>
+                                    <button type="button" class="btn btn-primary" id="backupBtn"><i class="fas fa-download ms-2"></i>إنشاء نسخة احتياطية</button>
                                 </div>
                                 <div class="col-md-6">
                                     <h6>جدولة النسخ</h6>
@@ -267,5 +267,69 @@ function syncCompanyLocationFields() {
 }
 
 countrySelect?.addEventListener('change', syncCompanyLocationFields);
+
+// Backup functionality
+document.getElementById('backupBtn')?.addEventListener('click', async function() {
+    const btn = this;
+    const originalText = btn.innerHTML;
+    
+    // Show loading state
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin ms-2"></i>جاري إنشاء النسخة الاحتياطية...';
+    
+    try {
+        const response = await fetch('{{ route("settings.backup") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Show success message
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-success alert-dismissible fade show mt-3';
+            alert.innerHTML = `
+                ${data.message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            btn.parentElement.appendChild(alert);
+        } else {
+            // Show error message
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-danger alert-dismissible fade show mt-3';
+            alert.innerHTML = `
+                ${data.message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            btn.parentElement.appendChild(alert);
+        }
+    } catch (error) {
+        // Show error message
+        const alert = document.createElement('div');
+        alert.className = 'alert alert-danger alert-dismissible fade show mt-3';
+        alert.innerHTML = `
+            حدث خطأ في الاتصال بالخادم
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        btn.parentElement.appendChild(alert);
+    } finally {
+        // Restore button state
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+        
+        // Auto-remove alerts after 5 seconds
+        setTimeout(() => {
+            document.querySelectorAll('.alert').forEach(alert => {
+                if (alert.parentElement) {
+                    alert.remove();
+                }
+            });
+        }, 5000);
+    }
+});
 </script>
 @endpush
