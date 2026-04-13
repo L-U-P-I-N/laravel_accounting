@@ -32,8 +32,8 @@
         <div class="col-md-3 mb-3 mb-md-0">
             <div class="stat-card">
                 <div class="stat-icon blue"><i class="fas fa-wallet"></i></div>
-                <div class="stat-value fs-5">{{ number_format((float) $account->balance, 2) }}</div>
-                <div class="stat-label">الرصيد الحالي ({{ $company->currency }})</div>
+                <div class="stat-value fs-5">{{ number_format((float) ($account->rolled_up_balance ?? $account->balance), 2) }}</div>
+                <div class="stat-label">الرصيد الإجمالي ({{ $company->currency }})</div>
             </div>
         </div>
         <div class="col-md-3 mb-3 mb-md-0">

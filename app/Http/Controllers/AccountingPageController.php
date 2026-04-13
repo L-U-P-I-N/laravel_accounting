@@ -1419,6 +1419,49 @@ class AccountingPageController extends Controller
             'children' => fn ($query) => $query->orderBy('code'),
         ])->loadCount(['children', 'journalLines']);
 
+        // إعادة حساب الأرصدة من القيود المحاسبية مباشرة
+        $balances = JournalLine::join('journal_entries', 'journal_lines.journal_entry_id', '=', 'journal_entries.id')
+            ->where('journal_entries.company_id', $company->id)
+            ->where('journal_entries.status', 'posted')
+            ->select('account_id', DB::raw('SUM(debit) as total_debit'), DB::raw('SUM(credit) as total_credit'))
+            ->groupBy('account_id')
+            ->get()
+            ->keyBy('account_id');
+
+        // دالة مساعدة لحساب الرصيد
+        $calculateBalance = function ($account) use ($balances) {
+            $balanceData = $balances->get($account->id);
+            $debit = $balanceData ? (float) $balanceData->total_debit : 0;
+            $credit = $balanceData ? (float) $balanceData->total_credit : 0;
+            
+            if (in_array($account->account_type, ['asset', 'expense', 'cogs'])) {
+                return $debit - $credit;
+            } else {
+                return $credit - $debit;
+            }
+        };
+
+        // تحديث رصيد الحساب الحالي
+        $account->balance = $calculateBalance($account);
+        
+        // تحديث رصيد الحسابات الفرعية
+        foreach ($account->children as $child) {
+            $child->balance = $calculateBalance($child);
+        }
+
+        // حساب rolled_up_balance لجميع الحسابات
+        $allAccountsForBalances = Account::where('company_id', $company->id)->get();
+        foreach ($allAccountsForBalances as $acc) {
+            $acc->balance = $calculateBalance($acc);
+        }
+        $rolledUpBalances = $this->calculateAllRolledUpBalances($allAccountsForBalances);
+        
+        // تعيين rolled_up_balance للحساب الحالي والفرعية
+        $account->rolled_up_balance = $rolledUpBalances[$account->id] ?? (float) $account->balance;
+        foreach ($account->children as $child) {
+            $child->rolled_up_balance = $rolledUpBalances[$child->id] ?? (float) $child->balance;
+        }
+
         $ancestors = $this->accountAncestors($account, $allAccounts);
         $recentJournalLines = JournalLine::query()
             ->with(['journalEntry', 'account'])

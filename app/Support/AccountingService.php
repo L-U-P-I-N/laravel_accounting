@@ -177,9 +177,16 @@ class AccountingService
         // 3. Credit Side: Settlement Account (Bank/Cash or Supplier)
         // We use the calculated totalDebit to ensure the entry is always balanced
         if ($totalDebit > 0) {
+            // استخدام حساب المورد الفرعي (2101-S*) إذا كان هناك مورد ولم يتم الدفع نقداً
+            if ($purchase->supplier && ! $purchase->paymentAccount) {
+                $creditAccount = $purchase->supplier->account;
+            } else {
+                $creditAccount = $this->settlementAccountForPurchase($purchase);
+            }
+            
             $this->pushLine(
                 $lines,
-                $this->settlementAccountForPurchase($purchase),
+                $creditAccount,
                 'إثبات استحقاق/سداد طلب الشراء ' . $purchase->purchase_number,
                 0,
                 $totalDebit,
