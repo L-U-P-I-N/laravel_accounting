@@ -101,7 +101,16 @@ Route::middleware(['auth', 'password.change', 'company'])->group(function () {
         Route::get('/reports', [AccountingPageController::class, 'reports'])->name('reports');
         Route::get('/reports/operations-activity', [AccountingPageController::class, 'operationsActivityReport'])->name('reports.operations_activity');
         Route::get('/reports/view/{report}', [AccountingPageController::class, 'reportShow'])->name('reports.show');
-        Route::get('/reports/query', [AccountingPageController::class, 'reportQuery'])->name('reports.query');
+        Route::get('/reports/inventory', [AccountingPageController::class, 'inventoryReport'])->name('reports.inventory');
+        Route::get('/reports/financial', [AccountingPageController::class, 'financialReport'])->name('reports.financial');
+    });
+
+    Route::middleware(['auth', 'company'])->prefix('{locale?}')->group(function () {
+        Route::get('/reports/product-tracking', [ProductReportController::class, 'productTrackingReport'])->name('reports.product-tracking');
+        Route::get('/reports/product-performance', [ProductReportController::class, 'productPerformanceReport'])->name('reports.product-performance');
+        Route::get('/reports/product-performance/print', [ProductReportController::class, 'productPerformancePrint'])->name('reports.product-performance.print');
+        Route::get('/reports/product-movements', [ProductReportController::class, 'productMovementsReport'])->name('reports.product-movements');
+        Route::get('/reports/product-movements/print', [ProductReportController::class, 'productMovementsPrint'])->name('reports.product-movements.print');
     });
 
     Route::middleware('permission:manage_employees')->group(function () {
