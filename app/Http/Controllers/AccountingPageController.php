@@ -51,8 +51,7 @@ class AccountingPageController extends Controller
         private readonly InventoryMovementService $inventoryMovementService,
         private readonly PaymentSyncService $paymentSyncService,
         private readonly ReferenceGenerator $referenceGenerator,
-    )
-    {
+    ) {
     }
 
     public function invoices(Request $request): View
@@ -278,8 +277,8 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
         abort_if((int) $invoice->company_id !== (int) $company->id, 404);
-        abort_if(! $invoice->attachment_path, 404);
-        abort_if(! Storage::disk('public')->exists($invoice->attachment_path), 404);
+        abort_if(!$invoice->attachment_path, 404);
+        abort_if(!Storage::disk('public')->exists($invoice->attachment_path), 404);
 
         return Storage::disk('public')->response($invoice->attachment_path);
     }
@@ -350,18 +349,18 @@ class AccountingPageController extends Controller
         $dateTo = $request->string('date_to')->toString();
         $sortDirection = $this->sortDirection($request);
         $purchases = Purchase::with([
-                'supplier',
-                'items.product',
-                'payments' => fn ($query) => $query
-                    ->where('payment_category', 'purchase_payment')
-                    ->orderBy('payment_date', $sortDirection)
-                    ->orderBy('id', $sortDirection),
-            ])
+            'supplier',
+            'items.product',
+            'payments' => fn($query) => $query
+                ->where('payment_category', 'purchase_payment')
+                ->orderBy('payment_date', $sortDirection)
+                ->orderBy('id', $sortDirection),
+        ])
             ->where('company_id', $company->id)
-            ->when($statusFilter !== '', fn ($query) => $query->where('status', $statusFilter))
-            ->when($supplierFilter !== '', fn ($query) => $query->where('supplier_id', $supplierFilter))
-            ->when($dateFrom !== '', fn ($query) => $query->whereDate('purchase_date', '>=', $dateFrom))
-            ->when($dateTo !== '', fn ($query) => $query->whereDate('purchase_date', '<=', $dateTo))
+            ->when($statusFilter !== '', fn($query) => $query->where('status', $statusFilter))
+            ->when($supplierFilter !== '', fn($query) => $query->where('supplier_id', $supplierFilter))
+            ->when($dateFrom !== '', fn($query) => $query->whereDate('purchase_date', '>=', $dateFrom))
+            ->when($dateTo !== '', fn($query) => $query->whereDate('purchase_date', '<=', $dateTo))
             ->orderBy('purchase_date', $sortDirection)
             ->orderBy('id', $sortDirection)
             ->get();
@@ -554,7 +553,7 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         abort_if((int) $purchase->company_id !== (int) $company->id, 404);
 
-        if (! in_array($purchase->status, ['draft', 'pending'], true)) {
+        if (!in_array($purchase->status, ['draft', 'pending'], true)) {
             return redirect()->route('purchases')->with('status', 'لا يمكن اعتماد طلب الشراء في حالته الحالية.');
         }
 
@@ -564,7 +563,7 @@ class AccountingPageController extends Controller
         DB::transaction(function () use ($purchase, $user) {
             $purchase->loadMissing(['items.product', 'supplier']);
 
-            if (! $this->inventoryMovementService->hasMovementsForSource($purchase)) {
+            if (!$this->inventoryMovementService->hasMovementsForSource($purchase)) {
                 $this->applyPurchaseStock((int) $purchase->company_id, $this->purchaseStockRequirementsFromItems($purchase->items));
             }
 
@@ -599,7 +598,7 @@ class AccountingPageController extends Controller
             'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max((float) $purchase->balance_due, 0.01)],
             'payment_account_id' => [
                 'required',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                Rule::exists('accounts', 'id')->where(fn($query) => $query
                     ->where('company_id', $company->id)
                     ->where('allows_direct_transactions', true)
                     ->where('is_active', true)),
@@ -724,8 +723,8 @@ class AccountingPageController extends Controller
     {
         $company = $this->company($request);
         abort_if((int) $purchase->company_id !== (int) $company->id, 404);
-        abort_if(! $purchase->attachment_path, 404);
-        abort_if(! Storage::disk('public')->exists($purchase->attachment_path), 404);
+        abort_if(!$purchase->attachment_path, 404);
+        abort_if(!Storage::disk('public')->exists($purchase->attachment_path), 404);
 
         return Storage::disk('public')->response($purchase->attachment_path);
     }
@@ -780,7 +779,7 @@ class AccountingPageController extends Controller
         $sortDirection = $this->sortDirection($request);
 
         $customer->load([
-            'invoices' => fn ($query) => $query->orderBy('invoice_date', $sortDirection)->orderBy('id', $sortDirection),
+            'invoices' => fn($query) => $query->orderBy('invoice_date', $sortDirection)->orderBy('id', $sortDirection),
         ]);
 
         $customer->code = $customer->code ?: 'CUS-' . str_pad((string) $customer->id, 4, '0', STR_PAD_LEFT);
@@ -798,7 +797,7 @@ class AccountingPageController extends Controller
         DB::transaction(function () use ($validated, $company) {
             $customer = Customer::create($this->customerPayload($validated, $company));
 
-            if (! $customer->code) {
+            if (!$customer->code) {
                 $customer->update([
                     'code' => 'CUS-' . str_pad((string) $customer->id, 4, '0', STR_PAD_LEFT),
                 ]);
@@ -820,7 +819,7 @@ class AccountingPageController extends Controller
         DB::transaction(function () use ($customer, $validated, $company) {
             $customer->update($this->customerPayload($validated, $company, $customer));
 
-            if (! $customer->code) {
+            if (!$customer->code) {
                 $customer->update([
                     'code' => 'CUS-' . str_pad((string) $customer->id, 4, '0', STR_PAD_LEFT),
                 ]);
@@ -853,9 +852,11 @@ class AccountingPageController extends Controller
         $companyCities = collect($companyCountry['cities'] ?? []);
 
         $suppliers = Supplier::where('company_id', $company->id)
-            ->with(['purchases' => function ($query) {
-                $query->orderByDesc('purchase_date');
-            }])
+            ->with([
+                'purchases' => function ($query) {
+                    $query->orderByDesc('purchase_date');
+                }
+            ])
             ->withCount('products')
             ->orderBy('name')
             ->get()
@@ -878,8 +879,8 @@ class AccountingPageController extends Controller
         $sortDirection = $this->sortDirection($request);
 
         $supplier->load([
-            'purchases' => fn ($query) => $query->orderBy('purchase_date', $sortDirection)->orderBy('id', $sortDirection),
-            'products' => fn ($query) => $query->orderBy('name'),
+            'purchases' => fn($query) => $query->orderBy('purchase_date', $sortDirection)->orderBy('id', $sortDirection),
+            'products' => fn($query) => $query->orderBy('name'),
         ])->loadCount(['products', 'purchases']);
 
         $supplier->code = $supplier->code ?: 'SUP-' . str_pad((string) $supplier->id, 4, '0', STR_PAD_LEFT);
@@ -900,7 +901,7 @@ class AccountingPageController extends Controller
         DB::transaction(function () use ($validated, $company) {
             $supplier = Supplier::create($this->supplierPayload($validated, $company));
 
-            if (! $supplier->code) {
+            if (!$supplier->code) {
                 $supplier->update([
                     'code' => 'SUP-' . str_pad((string) $supplier->id, 4, '0', STR_PAD_LEFT),
                 ]);
@@ -922,7 +923,7 @@ class AccountingPageController extends Controller
         DB::transaction(function () use ($supplier, $validated, $company) {
             $supplier->update($this->supplierPayload($validated, $company, $supplier));
 
-            if (! $supplier->code) {
+            if (!$supplier->code) {
                 $supplier->update([
                     'code' => 'SUP-' . str_pad((string) $supplier->id, 4, '0', STR_PAD_LEFT),
                 ]);
@@ -943,7 +944,7 @@ class AccountingPageController extends Controller
         $company = $this->company($request);
         abort_if((int) $supplier->company_id !== (int) $company->id, 404);
 
-        $supplier->load(['purchases' => fn ($query) => $query->orderBy('purchase_date')]);
+        $supplier->load(['purchases' => fn($query) => $query->orderBy('purchase_date')]);
         $outstandingBalance = (float) $supplier->purchases->where('balance_due', '>', 0)->sum('balance_due');
 
         $validated = $request->validate([
@@ -951,7 +952,7 @@ class AccountingPageController extends Controller
             'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max($outstandingBalance, 0.01)],
             'payment_account_id' => [
                 'required',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                Rule::exists('accounts', 'id')->where(fn($query) => $query
                     ->where('company_id', $company->id)
                     ->where('allows_direct_transactions', true)
                     ->where('is_active', true)),
@@ -1067,11 +1068,11 @@ class AccountingPageController extends Controller
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'expense_account_id' => [
                 'nullable',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+                Rule::exists('accounts', 'id')->where(fn($query) => $query->where('company_id', $company->id)),
             ],
             'expense_id' => [
                 'nullable',
-                Rule::exists('expenses', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+                Rule::exists('expenses', 'id')->where(fn($query) => $query->where('company_id', $company->id)),
             ],
         ]);
 
@@ -1184,7 +1185,7 @@ class AccountingPageController extends Controller
         DB::transaction(function () use ($validated, $company) {
             $product = Product::create($this->productPayload($validated, $company->id));
 
-            if (! $product->code) {
+            if (!$product->code) {
                 $product->update([
                     'code' => 'PRD-' . str_pad((string) $product->id, 4, '0', STR_PAD_LEFT),
                 ]);
@@ -1208,7 +1209,7 @@ class AccountingPageController extends Controller
         DB::transaction(function () use ($product, $validated, $company) {
             $product->update($this->productPayload($validated, $company->id));
 
-            if (! $product->code) {
+            if (!$product->code) {
                 $product->update([
                     'code' => 'PRD-' . str_pad((string) $product->id, 4, '0', STR_PAD_LEFT),
                 ]);
@@ -1238,12 +1239,12 @@ class AccountingPageController extends Controller
         return redirect()->route('chart_of_accounts')->with(
             'status',
             'تمت إعادة مزامنة الدليل المحاسبي والقيود الآلية. الفواتير: '
-                . $summary['invoices']
-                . '، المشتريات: '
-                . $summary['purchases']
-                . '، المصروفات: '
-                . $summary['expenses']
-                . '.'
+            . $summary['invoices']
+            . '، المشتريات: '
+            . $summary['purchases']
+            . '، المصروفات: '
+            . $summary['expenses']
+            . '.'
         );
     }
 
@@ -1262,7 +1263,7 @@ class AccountingPageController extends Controller
     public function chartOfAccounts(Request $request): View
     {
         $company = $this->company($request);
-        
+
         // Fetch all accounts for the company
         $allAccounts = Account::query()
             ->where('company_id', $company->id)
@@ -1295,7 +1296,7 @@ class AccountingPageController extends Controller
                 $balanceData = $balances->get($account->id);
                 $debit = $balanceData ? (float) $balanceData->total_debit : 0;
                 $credit = $balanceData ? (float) $balanceData->total_credit : 0;
-                
+
                 if (in_array($account->account_type, ['asset', 'expense', 'cogs'])) {
                     $account->balance = $debit - $credit;
                 } else {
@@ -1305,28 +1306,28 @@ class AccountingPageController extends Controller
         }
 
         $includeDynamicAccounts = $request->boolean('include_dynamic');
-        
+
         // حساب rolled_up_balance من جميع الحسابات (بما فيها الديناميكية) قبل الفلترة
         // حتى يظهر رصيد الحسابات الرئيسية بشكل صحيح حتى لو كانت الحسابات الفرعية مخفية
         $rolledUpBalances = $this->calculateAllRolledUpBalances($allAccounts);
         foreach ($allAccounts as $account) {
             $account->rolled_up_balance = $rolledUpBalances[$account->id] ?? (float) $account->balance;
         }
-        
+
         $visibleAccounts = $this->visibleChartAccounts($allAccounts, $includeDynamicAccounts);
         $accountFilters = $this->chartAccountFilters($request);
 
         $hasAccountFilters = $this->hasAccountFilters($accountFilters);
         $matchingAccounts = $this->filterAccounts($visibleAccounts, $accountFilters);
-        
+
         // buildAccountTree and buildFilteredAccountTree use nestAccounts internally
         $accounts = $hasAccountFilters
             ? $this->buildFilteredAccountTree($visibleAccounts, $matchingAccounts)
             : $this->buildAccountTree($visibleAccounts);
-            
+
         $accountStats = $hasAccountFilters ? $matchingAccounts : $visibleAccounts;
 
-        $parentOptions = $visibleAccounts->map(fn (Account $account) => [
+        $parentOptions = $visibleAccounts->map(fn(Account $account) => [
             'id' => $account->id,
             'code' => $account->code,
             'label' => $account->code . ' - ' . ($account->name_ar ?: $account->name),
@@ -1416,7 +1417,7 @@ class AccountingPageController extends Controller
 
         $account->load([
             'parent',
-            'children' => fn ($query) => $query->orderBy('code'),
+            'children' => fn($query) => $query->orderBy('code'),
         ])->loadCount(['children', 'journalLines']);
 
         // إعادة حساب الأرصدة من القيود المحاسبية مباشرة
@@ -1433,7 +1434,7 @@ class AccountingPageController extends Controller
             $balanceData = $balances->get($account->id);
             $debit = $balanceData ? (float) $balanceData->total_debit : 0;
             $credit = $balanceData ? (float) $balanceData->total_credit : 0;
-            
+
             if (in_array($account->account_type, ['asset', 'expense', 'cogs'])) {
                 return $debit - $credit;
             } else {
@@ -1443,7 +1444,7 @@ class AccountingPageController extends Controller
 
         // تحديث رصيد الحساب الحالي
         $account->balance = $calculateBalance($account);
-        
+
         // تحديث رصيد الحسابات الفرعية
         foreach ($account->children as $child) {
             $child->balance = $calculateBalance($child);
@@ -1455,7 +1456,7 @@ class AccountingPageController extends Controller
             $acc->balance = $calculateBalance($acc);
         }
         $rolledUpBalances = $this->calculateAllRolledUpBalances($allAccountsForBalances);
-        
+
         // تعيين rolled_up_balance للحساب الحالي والفرعية
         $account->rolled_up_balance = $rolledUpBalances[$account->id] ?? (float) $account->balance;
         foreach ($account->children as $child) {
@@ -1466,7 +1467,7 @@ class AccountingPageController extends Controller
         $recentJournalLines = JournalLine::query()
             ->with(['journalEntry', 'account'])
             ->where('account_id', $account->id)
-            ->whereHas('journalEntry', fn ($query) => $query->where('company_id', $company->id))
+            ->whereHas('journalEntry', fn($query) => $query->where('company_id', $company->id))
             ->latest('journal_entry_id')
             ->limit(12)
             ->get();
@@ -1500,7 +1501,7 @@ class AccountingPageController extends Controller
                 ->where('company_id', $company->id)
                 ->find($parentId);
 
-            if (! $parent) {
+            if (!$parent) {
                 throw ValidationException::withMessages([
                     'parent_id' => 'الحساب الأب المحدد غير موجود.',
                 ]);
@@ -1539,7 +1540,7 @@ class AccountingPageController extends Controller
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'account_id' => [
                 'nullable',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id)),
+                Rule::exists('accounts', 'id')->where(fn($query) => $query->where('company_id', $company->id)),
             ],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
@@ -1549,7 +1550,7 @@ class AccountingPageController extends Controller
 
         $entries = JournalEntry::with(['lines.account'])
             ->where('company_id', $company->id)
-            ->when(! empty($filters['search']), function ($query) use ($filters) {
+            ->when(!empty($filters['search']), function ($query) use ($filters) {
                 $search = trim((string) $filters['search']);
 
                 $query->where(function ($nestedQuery) use ($search) {
@@ -1558,11 +1559,11 @@ class AccountingPageController extends Controller
                         ->orWhere('reference', 'like', '%' . $search . '%');
                 });
             })
-            ->when(! empty($filters['status']), fn ($query) => $query->where('status', $filters['status']))
-            ->when(! empty($filters['date_from']), fn ($query) => $query->whereDate('entry_date', '>=', $filters['date_from']))
-            ->when(! empty($filters['date_to']), fn ($query) => $query->whereDate('entry_date', '<=', $filters['date_to']))
-            ->when(! empty($filters['account_id']), function ($query) use ($filters) {
-                $query->whereHas('lines', fn ($linesQuery) => $linesQuery->where('account_id', $filters['account_id']));
+            ->when(!empty($filters['status']), fn($query) => $query->where('status', $filters['status']))
+            ->when(!empty($filters['date_from']), fn($query) => $query->whereDate('entry_date', '>=', $filters['date_from']))
+            ->when(!empty($filters['date_to']), fn($query) => $query->whereDate('entry_date', '<=', $filters['date_to']))
+            ->when(!empty($filters['account_id']), function ($query) use ($filters) {
+                $query->whereHas('lines', fn($linesQuery) => $linesQuery->where('account_id', $filters['account_id']));
             })
             ->orderBy('entry_date', $sortDirection)
             ->orderBy('id', $sortDirection)
@@ -1672,7 +1673,7 @@ class AccountingPageController extends Controller
             ->with(['purchase.supplier', 'invoice.customer', 'supplier'])
             ->where('company_id', $company->id)
             ->whereBetween('payment_date', [$dateFrom, $dateTo])
-            ->when($reference !== '', fn ($query) => $query->where('reference', 'like', '%' . $reference . '%'))
+            ->when($reference !== '', fn($query) => $query->where('reference', 'like', '%' . $reference . '%'))
             ->orderBy('payment_date', $sortDirection)
             ->orderBy('id', $sortDirection)
             ->get();
@@ -1681,7 +1682,7 @@ class AccountingPageController extends Controller
             ->with('product')
             ->where('company_id', $company->id)
             ->whereBetween('movement_date', [$dateFrom, $dateTo])
-            ->when($reference !== '', fn ($query) => $query->where('reference_number', 'like', '%' . $reference . '%'))
+            ->when($reference !== '', fn($query) => $query->where('reference_number', 'like', '%' . $reference . '%'))
             ->orderBy('movement_date', $sortDirection)
             ->orderBy('id', $sortDirection)
             ->get();
@@ -1768,12 +1769,12 @@ class AccountingPageController extends Controller
             'date_from' => [
                 'nullable',
                 'date',
-                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                Rule::requiredIf(fn() => $request->input('period') === 'custom'),
             ],
             'date_to' => [
                 'nullable',
                 'date',
-                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                Rule::requiredIf(fn() => $request->input('period') === 'custom'),
                 'after_or_equal:date_from',
             ],
         ]);
@@ -1789,13 +1790,13 @@ class AccountingPageController extends Controller
             ?? $this->legacyReportTypeToInteractiveKey($validated['report_type'] ?? null)
             ?? 'sales_by_invoice';
 
-        if (! array_key_exists($initialReportKey, $catalog)) {
+        if (!array_key_exists($initialReportKey, $catalog)) {
             $initialReportKey = 'sales_by_invoice';
         }
 
         $initialSection = $validated['section'] ?? ($catalog[$initialReportKey]['section'] ?? 'sales');
 
-        if (! array_key_exists($initialSection, $sections)) {
+        if (!array_key_exists($initialSection, $sections)) {
             $initialSection = $catalog[$initialReportKey]['section'] ?? 'sales';
         }
 
@@ -1817,7 +1818,7 @@ class AccountingPageController extends Controller
 
         $sectionCounts = collect($catalog)
             ->groupBy('section')
-            ->map(fn (Collection $items) => $items->count())
+            ->map(fn(Collection $items) => $items->count())
             ->all();
 
         return view('reports', [
@@ -1853,12 +1854,12 @@ class AccountingPageController extends Controller
             'date_from' => [
                 'nullable',
                 'date',
-                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                Rule::requiredIf(fn() => $request->input('period') === 'custom'),
             ],
             'date_to' => [
                 'nullable',
                 'date',
-                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                Rule::requiredIf(fn() => $request->input('period') === 'custom'),
                 'after_or_equal:date_from',
             ],
         ]);
@@ -1911,12 +1912,12 @@ class AccountingPageController extends Controller
             'date_from' => [
                 'nullable',
                 'date',
-                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                Rule::requiredIf(fn() => $request->input('period') === 'custom'),
             ],
             'date_to' => [
                 'nullable',
                 'date',
-                Rule::requiredIf(fn () => $request->input('period') === 'custom'),
+                Rule::requiredIf(fn() => $request->input('period') === 'custom'),
                 'after_or_equal:date_from',
             ],
         ]);
@@ -1948,13 +1949,13 @@ class AccountingPageController extends Controller
         $validated = $request->validate([
             'report_type' => ['nullable', Rule::in(array_keys($reportTypes))],
             'period' => ['nullable', Rule::in(array_keys($periodOptions))],
-            'date_from' => ['nullable', 'date', Rule::requiredIf(fn () => $request->input('period') === 'custom')],
-            'date_to' => ['nullable', 'date', Rule::requiredIf(fn () => $request->input('period') === 'custom'), 'after_or_equal:date_from'],
-            'account_id' => ['nullable', Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
-            'product_id' => ['nullable', Rule::exists('products', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
-            'expense_id' => ['nullable', Rule::exists('expenses', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
-            'customer_id' => ['nullable', Rule::exists('customers', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
-            'supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where(fn ($query) => $query->where('company_id', $company->id))],
+            'date_from' => ['nullable', 'date', Rule::requiredIf(fn() => $request->input('period') === 'custom')],
+            'date_to' => ['nullable', 'date', Rule::requiredIf(fn() => $request->input('period') === 'custom'), 'after_or_equal:date_from'],
+            'account_id' => ['nullable', Rule::exists('accounts', 'id')->where(fn($query) => $query->where('company_id', $company->id))],
+            'product_id' => ['nullable', Rule::exists('products', 'id')->where(fn($query) => $query->where('company_id', $company->id))],
+            'expense_id' => ['nullable', Rule::exists('expenses', 'id')->where(fn($query) => $query->where('company_id', $company->id))],
+            'customer_id' => ['nullable', Rule::exists('customers', 'id')->where(fn($query) => $query->where('company_id', $company->id))],
+            'supplier_id' => ['nullable', Rule::exists('suppliers', 'id')->where(fn($query) => $query->where('company_id', $company->id))],
             'print' => ['nullable', 'boolean'],
         ]);
 
@@ -2039,14 +2040,21 @@ class AccountingPageController extends Controller
             'product_performance' => ['section' => 'inventory', 'icon' => 'fa-chart-line', 'title' => 'تقرير أداء المنتج', 'description' => 'عرض مبيعات كل منتج في النظام على حدة حتى تتمكن من معرفة المنتجات الأفضل أداءاً والأكثر تحقيقاً للأرباح.', 'query_preview' => "SELECT p.name, SUM(ii.quantity) AS qty, SUM(ii.total) AS sales, SUM((ii.price - p.cost_price) * ii.quantity) AS profit\nFROM products p\nJOIN invoice_items ii ON ii.product_id = p.id\nJOIN invoices i ON i.id = ii.invoice_id\nWHERE i.company_id = ? AND i.status = 'completed'\nGROUP BY p.id;"],
             'product_movements' => ['section' => 'inventory', 'icon' => 'fa-dolly', 'title' => 'حركة المنتجات', 'description' => 'تعرف على حركة منتجات مخزونك علماً بانها يتم ادراجها في تقارير المخزون.', 'query_preview' => "SELECT sm.created_at, p.name, sm.type, sm.quantity, sm.reference_type, w.name AS warehouse\nFROM stock_movements sm\nJOIN products p ON p.id = sm.product_id\nLEFT JOIN warehouses w ON w.id = sm.warehouse_id\nWHERE sm.company_id = ?\nORDER BY sm.created_at DESC;"],
             'tax_return' => ['section' => 'taxes', 'icon' => 'fa-file-contract', 'title' => 'الإقرار الضريبي', 'description' => 'ملخص شامل لكل ما يتعلق بالضرائب في النظام، يساعدك على البقاء متوافقا مع متطلبات هيئة الزكاة والدخل والإفصاح عن تقريرك الضريبي بكل سهولة.', 'query_preview' => "SELECT tax_type, SUM(tax_amount) AS tax\nFROM invoices\nWHERE company_id = ? AND status = 'completed'\nGROUP BY tax_type;\n\nSELECT tax_type, SUM(tax_amount) AS tax\nFROM purchases\nWHERE company_id = ? AND status = 'completed'\nGROUP BY tax_type;"],
-            'warehouse_coverage' => ['section' => 'warehouse', 'icon' => 'fa-ruler-combined', 'title' => 'تغطية المخزون مقابل الحد الأدنى', 'description' => 'قياس الجاهزية التشغيلية لكل منتج بمقارنة الرصيد الحالي بالحد الأدنى.', 'query_preview' => "SELECT name, stock_quantity, min_stock\nFROM products\nWHERE company_id = ?\nORDER BY (stock_quantity - min_stock) ASC;"],
-            'warehouse_incoming' => ['section' => 'warehouse', 'icon' => 'fa-dolly', 'title' => 'الوارد من المشتريات', 'description' => 'عرض الكميات المستلمة من الموردين خلال الفترة على مستوى المنتج.', 'query_preview' => "SELECT COALESCE(products.name, purchase_items.description) AS product_name, SUM(purchase_items.quantity) AS incoming_qty\nFROM purchase_items\nINNER JOIN purchases ON purchases.id = purchase_items.purchase_id\nLEFT JOIN products ON products.id = purchase_items.product_id\nWHERE purchases.company_id = ?\nGROUP BY COALESCE(products.name, purchase_items.description);"],
-            'warehouse_suppliers' => ['section' => 'warehouse', 'icon' => 'fa-people-carry-box', 'title' => 'الوارد حسب المورد', 'description' => 'تحليل حجم التوريد وقيمة الاستلامات لكل مورد داخل الفترة.', 'query_preview' => "SELECT suppliers.name, SUM(purchases.total) AS total_received\nFROM purchases\nINNER JOIN suppliers ON suppliers.id = purchases.supplier_id\nWHERE purchases.company_id = ?\nGROUP BY suppliers.id, suppliers.name;"],
-            'finance_income_statement' => ['section' => 'finance', 'icon' => 'fa-chart-pie', 'title' => 'قائمة الدخل', 'description' => 'مقارنة الإيرادات بالمشتريات والمصروفات للوصول إلى صافي الربح.', 'query_preview' => "SELECT SUM(total) AS total_revenue FROM invoices WHERE company_id = ?;"],
-            'finance_receivables' => ['section' => 'finance', 'icon' => 'fa-hand-holding-dollar', 'title' => 'الذمم المدينة', 'description' => 'أرصدة العملاء المستحقة أو عميل محدد مع توضيح المتبقي المفتوح.', 'query_preview' => "SELECT customers.name, SUM(invoices.balance_due) AS balance_due\nFROM invoices\nINNER JOIN customers ON customers.id = invoices.customer_id\nWHERE invoices.company_id = ?\nGROUP BY customers.id, customers.name;"],
-            'finance_payables' => ['section' => 'finance', 'icon' => 'fa-money-bill-transfer', 'title' => 'الذمم الدائنة', 'description' => 'أرصدة الموردين المستحقة وقيم المشتريات والضرائب المرتبطة بها.', 'query_preview' => "SELECT suppliers.name, SUM(purchases.balance_due) AS balance_due\nFROM purchases\nINNER JOIN suppliers ON suppliers.id = purchases.supplier_id\nWHERE purchases.company_id = ?\nGROUP BY suppliers.id, suppliers.name;"],
-            'finance_expenses' => ['section' => 'finance', 'icon' => 'fa-file-circle-minus', 'title' => 'تفاصيل المصروفات', 'description' => 'تقرير بالمصروفات المسجلة ومراجعها وحساباتها خلال الفترة.', 'query_preview' => "SELECT reference, total, expense_date\nFROM expenses\nWHERE company_id = ?\nORDER BY expense_date DESC;"],
-            'finance_accounts' => ['section' => 'finance', 'icon' => 'fa-sitemap', 'title' => 'أرصدة الحسابات', 'description' => 'عرض حركة وأرصدة شجرة الحسابات بالاعتماد على القيود اليومية المرحّلة.', 'query_preview' => "SELECT accounts.code, SUM(journal_lines.debit), SUM(journal_lines.credit)\nFROM journal_lines\nINNER JOIN accounts ON accounts.id = journal_lines.account_id\nGROUP BY accounts.id, accounts.code;"],
+            'warehouse_supplier_transactions' => ['section' => 'warehouse', 'icon' => 'fa-truck-field', 'title' => 'تقرير معاملات الموردين', 'description' => 'تتبع العمليات التي قام بها الموردون في متجرك.', 'query_preview' => '-- استعلام معاملات الموردين'],
+            'warehouse_supplier_payables' => ['section' => 'warehouse', 'icon' => 'fa-file-invoice-dollar', 'title' => 'مستحقات للموردين', 'description' => 'كشف حساب دائن شامل لكل الموردين يشمل العمليات والمبالغ المستحقة لكل فترة.', 'query_preview' => '-- استعلام مستحقات الموردين'],
+            'warehouse_inventory_audit' => ['section' => 'warehouse', 'icon' => 'fa-clipboard-check', 'title' => 'تقرير ملخص جرد المخزون', 'description' => 'إحصائيات عن عمليات جرد المخزون وتأثيرها على الكميات في المخزن.', 'query_preview' => '-- استعلام جرد المخزون'],
+            'warehouse_purchase_summary' => ['section' => 'warehouse', 'icon' => 'fa-cart-shopping', 'title' => 'ملخص فواتير المشتريات', 'description' => 'ملخص لعمليات المشتريات وقيمتها وكمياتها لتسهيل القرارات المستقبلية.', 'query_preview' => '-- استعلام ملخص المشتريات'],
+            'warehouse_purchase_details' => ['section' => 'warehouse', 'icon' => 'fa-receipt', 'title' => 'تفاصيل فاتورة الشراء', 'description' => 'تقرير تفصيلي يشمل التاريخ والكميات وبيانات تدعم اتخاذ قرار الشراء.', 'query_preview' => '-- استعلام تفاصيل الشراء'],
+            'warehouse_supplier_summary' => ['section' => 'warehouse', 'icon' => 'fa-address-book', 'title' => 'تقرير ملخص معاملات الموردين', 'description' => 'نظرة عامة على الموردين، بيانات التواصل، وإجمالي المعاملات والكميات.', 'query_preview' => '-- استعلام ملخص الموردين'],
+            'warehouse_supplier_receivables' => ['section' => 'warehouse', 'icon' => 'fa-hand-holding-dollar', 'title' => 'مستحقات من الموردين', 'description' => 'كشف حساب مدين شامل لكل الموردين يشمل العمليات والمبالغ المستحقة.', 'query_preview' => '-- استعلام مستحقات من الموردين'],
+            'warehouse_cost_change' => ['section' => 'warehouse', 'icon' => 'fa-chart-line', 'title' => 'التغير في سعر التكلفة', 'description' => 'ملخص لتغييرات تكلفة المنتج عبر الزمن وتأثيرها على صافي الربح.', 'query_preview' => '-- استعلام تغيير التكلفة'],
+            'finance_balance_sheet' => ['section' => 'finance', 'icon' => 'fa-scale-balanced', 'title' => 'قائمة المركز المالي', 'description' => 'هي قائمة تلخص أصول، وخصوم، وحقوق الملكية للمنشأة في تاريخ معين.', 'query_preview' => '-- استعلام قائمة المركز المالي'],
+            'finance_trial_balance' => ['section' => 'finance', 'icon' => 'fa-scale-unbalanced', 'title' => 'ميزان المراجعة', 'description' => 'هو كشف تظهر فيه مجاميع الأطراف المدينة ومجموع الأطراف الدائنة للحسابات.', 'query_preview' => '-- استعلام ميزان المراجعة'],
+            'finance_expense_categories' => ['section' => 'finance', 'icon' => 'fa-chart-pie', 'title' => 'تقرير فئات المصروفات', 'description' => 'تقرير أعلى المصروفات حسب الفئات خلال فترة زمنية محددة.', 'query_preview' => '-- استعلام فئات المصروفات'],
+            'finance_income_statement' => ['section' => 'finance', 'icon' => 'fa-file-invoice-dollar', 'title' => 'قائمة الدخل', 'description' => 'هي قائمة تظهر ربحية الشركة خلال فترة زمنية معينة، وتتكون من إيرادات ومصروفات المنشأة.', 'query_preview' => '-- استعلام قائمة الدخل'],
+            'finance_account_statements' => ['section' => 'finance', 'icon' => 'fa-file-lines', 'title' => 'كشوف الحسابات', 'description' => 'هو عبارة عن تقرير وميزان مالي يوضح وضع الحساب. فإما أن يكون دائنًا أو مدينًا.', 'query_preview' => '-- استعلام كشوف الحسابات'],
+            'finance_general_ledger' => ['section' => 'finance', 'icon' => 'fa-book', 'title' => 'دفتر الأستاذ العام', 'description' => 'سجل محاسبي يشتمل على جميع تفاصيل حسابات الشركة وحركاتها المالية.', 'query_preview' => '-- استعلام دفتر الأستاذ العام'],
+            'finance_wallet_transactions' => ['section' => 'finance', 'icon' => 'fa-wallet', 'title' => 'معاملات المحفظة', 'description' => 'توفير معلومات عن التغيرات التاريخية في النقد ومعدلات التدفقات النقدية.', 'query_preview' => '-- استعلام معاملات المحفظة'],
         ];
     }
 
@@ -2054,11 +2062,11 @@ class AccountingPageController extends Controller
     {
         return match ($legacyReportType) {
             'income_statement' => 'finance_income_statement',
-            'account_balances' => 'finance_accounts',
+            'account_balances' => 'finance_general_ledger',
             'product_sales' => 'sales_by_category',
-            'expense_details' => 'finance_expenses',
-            'receivables' => 'finance_receivables',
-            'payables' => 'finance_payables',
+            'expense_details' => 'finance_expense_categories',
+            'receivables' => 'customer_statement',
+            'payables' => 'warehouse_supplier_payables',
             'tax_summary' => 'tax_summary_live',
             default => null,
         };
@@ -2068,12 +2076,15 @@ class AccountingPageController extends Controller
     {
         return match ($interactiveKey) {
             'finance_income_statement' => 'income_statement',
-            'finance_accounts' => 'account_balances',
+            'finance_general_ledger' => 'account_balances',
+            'finance_expense_categories' => 'expense_details',
+            'finance_wallet_transactions' => 'cash_flow',
+            'finance_balance_sheet' => 'balance_sheet',
+            'finance_trial_balance' => 'trial_balance',
+            'finance_account_statements' => 'receivables',
             'sales_by_category', 'sales_by_location', 'sales_by_invoice', 'sales_by_customer', 'sales_by_payment_status', 'customer_transactions', 'sales_by_employee', 'sales_by_channel', 'transactions_by_branch', 'customer_product_sales', 'sales_by_period' => 'product_sales',
-            'finance_expenses' => 'expense_details',
-            'finance_receivables', 'customer_statement' => 'receivables',
-            'finance_payables', 'warehouse_suppliers', 'warehouse_incoming' => 'payables',
-            default => null,
+            'customer_statement' => 'receivables',
+            'warehouse_supplier_payables', 'warehouse_purchase_summary', 'warehouse_purchase_details' => 'payables',
             default => 'income_statement',
         };
     }
@@ -2366,7 +2377,7 @@ class AccountingPageController extends Controller
             ->groupBy('status_key', 'branch_name')
             ->orderByDesc('gross_sales')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn($row) => [
                 'payment_status' => $labels[$row->status_key] ?? $row->status_key,
                 'location' => $row->branch_name,
                 'sales' => (float) $row->net_sales,
@@ -2463,7 +2474,7 @@ class AccountingPageController extends Controller
             ->groupBy('channel_name', 'branch_name')
             ->orderByDesc('gross_sales')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn($row) => [
                 'sales_channel' => $row->channel_name,
                 'location' => $row->branch_name,
                 'sales' => (float) $row->net_sales,
@@ -2506,7 +2517,7 @@ class AccountingPageController extends Controller
             ->groupBy('customers.id', 'customers.name', 'customers.phone', 'branch_name')
             ->orderByDesc('gross_sales')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn($row) => [
                 'customer_name' => $row->customer_name,
                 'customer_phone' => $row->customer_phone,
                 'location' => $row->branch_name,
@@ -2602,7 +2613,7 @@ class AccountingPageController extends Controller
             ->selectRaw("customers.name as customer_name, COALESCE(NULLIF(products.name, ''), si.description) as product_name, SUM(si.quantity) as sold_qty, SUM(si.total_amount) as total_sales")
             ->orderByDesc('sold_qty')
             ->get()
-            ->map(fn ($row) => ['label' => $row->customer_name . ' / ' . $row->product_name, 'meta' => 'إجمالي المبيعات: ' . number_format((float) $row->total_sales, 2), 'value' => (float) $row->sold_qty, 'format' => 'number']);
+            ->map(fn($row) => ['label' => $row->customer_name . ' / ' . $row->product_name, 'meta' => 'إجمالي المبيعات: ' . number_format((float) $row->total_sales, 2), 'value' => (float) $row->sold_qty, 'format' => 'number']);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد منتجات مباعة للعملاء خلال الفترة المحددة.', 'number');
     }
@@ -2620,7 +2631,7 @@ class AccountingPageController extends Controller
             ->groupBy('i.invoice_date', 'product_name', 'product_number', 'branch_name')
             ->orderBy('i.invoice_date')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn($row) => [
                 'transaction_date' => $row->invoice_date,
                 'product_name' => $row->product_name,
                 'product_number' => $row->product_number,
@@ -2713,7 +2724,7 @@ class AccountingPageController extends Controller
                     'format' => 'currency',
                 ];
             })
-            ->filter(fn ($row) => $row['sales_with_tax'] > 0 || $row['outstanding_amount'] > 0)
+            ->filter(fn($row) => $row['sales_with_tax'] > 0 || $row['outstanding_amount'] > 0)
             ->sortByDesc('outstanding_amount')
             ->values();
 
@@ -2739,7 +2750,7 @@ class AccountingPageController extends Controller
         $rows = Product::forCompany($company->id)
             ->orderByDesc(DB::raw('stock_quantity * cost_price'))
             ->get()
-            ->map(fn (Product $product) => ['label' => $product->name, 'meta' => sprintf('المخزون: %s | التكلفة: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->cost_price, 2)), 'value' => round((float) $product->stock_quantity * (float) $product->cost_price, 2)]);
+            ->map(fn(Product $product) => ['label' => $product->name, 'meta' => sprintf('المخزون: %s | التكلفة: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->cost_price, 2)), 'value' => round((float) $product->stock_quantity * (float) $product->cost_price, 2)]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد منتجات لعرض لقطة المخزون الحالية.');
     }
@@ -2750,7 +2761,7 @@ class AccountingPageController extends Controller
             ->whereColumn('stock_quantity', '<=', 'min_stock')
             ->orderBy('stock_quantity')
             ->get()
-            ->map(fn (Product $product) => ['label' => $product->name, 'meta' => sprintf('الرصيد الحالي: %s | الحد الأدنى: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->min_stock, 2)), 'value' => max((float) $product->min_stock - (float) $product->stock_quantity, 0)]);
+            ->map(fn(Product $product) => ['label' => $product->name, 'meta' => sprintf('الرصيد الحالي: %s | الحد الأدنى: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->min_stock, 2)), 'value' => max((float) $product->min_stock - (float) $product->stock_quantity, 0)]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد منتجات منخفضة المخزون حالياً.');
     }
@@ -2767,7 +2778,7 @@ class AccountingPageController extends Controller
             ->groupBy('label')
             ->orderByDesc('sold_qty')
             ->get()
-            ->map(fn ($row) => ['label' => $row->label, 'meta' => 'إجمالي المبيعات: ' . number_format((float) $row->total_sales, 2), 'value' => (float) $row->sold_qty]);
+            ->map(fn($row) => ['label' => $row->label, 'meta' => 'إجمالي المبيعات: ' . number_format((float) $row->total_sales, 2), 'value' => (float) $row->sold_qty]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد حركة مبيعات كافية لحساب سرعة الدوران.');
     }
@@ -2780,7 +2791,7 @@ class AccountingPageController extends Controller
             ->where('tax_amount', '>', 0)
             ->orderByDesc('invoice_date')
             ->get(['invoice_number', 'invoice_date', 'tax_amount', 'total'])
-            ->map(fn (Invoice $invoice) => ['label' => $invoice->invoice_number, 'meta' => sprintf('التاريخ: %s | إجمالي الفاتورة: %s', optional($invoice->invoice_date)->format('Y-m-d'), number_format((float) $invoice->total, 2)), 'value' => (float) $invoice->tax_amount]);
+            ->map(fn(Invoice $invoice) => ['label' => $invoice->invoice_number, 'meta' => sprintf('التاريخ: %s | إجمالي الفاتورة: %s', optional($invoice->invoice_date)->format('Y-m-d'), number_format((float) $invoice->total, 2)), 'value' => (float) $invoice->tax_amount]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد ضرائب مبيعات ضمن الفترة المحددة.');
     }
@@ -2795,7 +2806,7 @@ class AccountingPageController extends Controller
             ->selectRaw('suppliers.name as label, COUNT(purchases.id) as purchase_count, SUM(purchases.tax_amount) as tax_total')
             ->orderByDesc('tax_total')
             ->get()
-            ->map(fn ($row) => ['label' => $row->label, 'meta' => 'عدد المشتريات: ' . $row->purchase_count, 'value' => (float) $row->tax_total]);
+            ->map(fn($row) => ['label' => $row->label, 'meta' => 'عدد المشتريات: ' . $row->purchase_count, 'value' => (float) $row->tax_total]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد ضرائب مشتريات مجمعة حسب المورد خلال الفترة المحددة.');
     }
@@ -2885,7 +2896,7 @@ class AccountingPageController extends Controller
         $rows = Product::forCompany($company->id)
             ->orderByRaw('(stock_quantity - min_stock) asc')
             ->get()
-            ->map(fn (Product $product) => ['label' => $product->name, 'meta' => sprintf('المخزون: %s | الحد الأدنى: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->min_stock, 2)), 'value' => round((float) $product->stock_quantity - (float) $product->min_stock, 2)]);
+            ->map(fn(Product $product) => ['label' => $product->name, 'meta' => sprintf('المخزون: %s | الحد الأدنى: %s', number_format((float) $product->stock_quantity, 2), number_format((float) $product->min_stock, 2)), 'value' => round((float) $product->stock_quantity - (float) $product->min_stock, 2)]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد بيانات كافية عن تغطية المخزون.');
     }
@@ -2901,7 +2912,7 @@ class AccountingPageController extends Controller
             ->groupBy('label')
             ->orderByDesc('incoming_qty')
             ->get()
-            ->map(fn ($row) => ['label' => $row->label, 'meta' => 'قيمة الوارد: ' . number_format((float) $row->total_value, 2), 'value' => (float) $row->incoming_qty]);
+            ->map(fn($row) => ['label' => $row->label, 'meta' => 'قيمة الوارد: ' . number_format((float) $row->total_value, 2), 'value' => (float) $row->incoming_qty]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد حركات وارد من المشتريات ضمن الفترة المحددة.');
     }
@@ -2916,7 +2927,7 @@ class AccountingPageController extends Controller
             ->selectRaw('suppliers.name as label, COUNT(purchases.id) as purchase_count, SUM(purchases.total) as total_received')
             ->orderByDesc('total_received')
             ->get()
-            ->map(fn ($row) => ['label' => $row->label, 'meta' => 'عدد أوامر الشراء: ' . $row->purchase_count, 'value' => (float) $row->total_received]);
+            ->map(fn($row) => ['label' => $row->label, 'meta' => 'عدد أوامر الشراء: ' . $row->purchase_count, 'value' => (float) $row->total_received]);
 
         return $this->interactiveCollectionReport($rows, 'لا توجد استلامات موردين ضمن الفترة المحددة.');
     }
@@ -2929,7 +2940,7 @@ class AccountingPageController extends Controller
             'chart' => [
                 'type' => 'bar',
                 'labels' => $rows->pluck('label')->take(8)->values(),
-                'values' => $rows->pluck('value')->map(fn ($value) => round((float) $value, 2))->take(8)->values(),
+                'values' => $rows->pluck('value')->map(fn($value) => round((float) $value, 2))->take(8)->values(),
             ],
             'highlights' => [
                 ['label' => 'عدد النتائج', 'value' => $rows->count(), 'format' => 'number'],
@@ -3148,7 +3159,7 @@ class AccountingPageController extends Controller
             if ($company->logo_url && Storage::disk('public')->exists($company->logo_url)) {
                 Storage::disk('public')->delete($company->logo_url);
             }
-            
+
             $logoPath = $request->file('logo')->store('company-logos', 'public');
             $updateData['logo_url'] = $logoPath;
         }
@@ -3231,7 +3242,7 @@ class AccountingPageController extends Controller
     {
         return Expense::with(['expenseAccount', 'paymentAccount', 'creator'])
             ->where('company_id', $companyId)
-            ->when(! empty($filters['search']), function ($query) use ($filters) {
+            ->when(!empty($filters['search']), function ($query) use ($filters) {
                 $search = trim((string) $filters['search']);
 
                 $query->where(function ($nestedQuery) use ($search) {
@@ -3241,10 +3252,10 @@ class AccountingPageController extends Controller
                         ->orWhere('expense_number', 'like', '%' . $search . '%');
                 });
             })
-            ->when(! empty($filters['date_from']), fn ($query) => $query->whereDate('expense_date', '>=', $filters['date_from']))
-            ->when(! empty($filters['date_to']), fn ($query) => $query->whereDate('expense_date', '<=', $filters['date_to']))
-            ->when(! empty($filters['expense_account_id']), fn ($query) => $query->where('expense_account_id', $filters['expense_account_id']))
-            ->when(! empty($filters['expense_id']), fn ($query) => $query->where('id', $filters['expense_id']));
+            ->when(!empty($filters['date_from']), fn($query) => $query->whereDate('expense_date', '>=', $filters['date_from']))
+            ->when(!empty($filters['date_to']), fn($query) => $query->whereDate('expense_date', '<=', $filters['date_to']))
+            ->when(!empty($filters['expense_account_id']), fn($query) => $query->where('expense_account_id', $filters['expense_account_id']))
+            ->when(!empty($filters['expense_id']), fn($query) => $query->where('id', $filters['expense_id']));
     }
 
     private function reportSummaryStats(int $companyId, Carbon $dateFrom, Carbon $dateTo): array
@@ -3322,7 +3333,7 @@ class AccountingPageController extends Controller
             'chart' => [
                 'type' => 'bar',
                 'labels' => $rows->pluck('label')->values(),
-                'values' => $rows->pluck('value')->map(fn ($value) => round((float) $value, 2))->values(),
+                'values' => $rows->pluck('value')->map(fn($value) => round((float) $value, 2))->values(),
             ],
             'highlights' => [
                 ['label' => 'الإيرادات', 'value' => $revenue],
@@ -3341,7 +3352,7 @@ class AccountingPageController extends Controller
             ->join('accounts', 'accounts.id', '=', 'journal_lines.account_id')
             ->where('journal_entries.company_id', $company->id)
             ->whereBetween('journal_entries.entry_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
-            ->when($selectedAccountId, fn ($query) => $query->where('accounts.id', $selectedAccountId))
+            ->when($selectedAccountId, fn($query) => $query->where('accounts.id', $selectedAccountId))
             ->groupBy('accounts.id', 'accounts.code', 'accounts.name', 'accounts.account_type')
             ->selectRaw('accounts.id, accounts.code, accounts.name, accounts.account_type, SUM(journal_lines.debit) as debit_total, SUM(journal_lines.credit) as credit_total')
             ->orderBy('accounts.code')
@@ -3365,7 +3376,7 @@ class AccountingPageController extends Controller
             'chart' => [
                 'type' => 'bar',
                 'labels' => $rows->pluck('label')->take(8)->values(),
-                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn($value) => round((float) $value, 2))->values(),
             ],
             'highlights' => [
                 ['label' => 'عدد الحسابات', 'value' => $rows->count()],
@@ -3384,12 +3395,12 @@ class AccountingPageController extends Controller
             ->where('invoices.company_id', $company->id)
             ->whereIn('invoices.status', ['sent', 'partial', 'paid'])
             ->whereBetween('invoices.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
-            ->when($selectedProductId, fn ($query) => $query->where('products.id', $selectedProductId))
+            ->when($selectedProductId, fn($query) => $query->where('products.id', $selectedProductId))
             ->groupBy('products.id', 'products.name', 'invoice_items.description')
             ->selectRaw('products.id, COALESCE(products.name, invoice_items.description) as label, SUM(invoice_items.quantity) as quantity_sold, SUM(invoice_items.total) as total_sales')
             ->orderByDesc('total_sales')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn($row) => [
                 'label' => $row->label,
                 'value' => (float) $row->total_sales,
                 'meta' => 'الكمية المباعة: ' . number_format((float) $row->quantity_sold, 2),
@@ -3401,7 +3412,7 @@ class AccountingPageController extends Controller
             'chart' => [
                 'type' => 'bar',
                 'labels' => $rows->pluck('label')->take(8)->values(),
-                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn($value) => round((float) $value, 2))->values(),
             ],
             'highlights' => [
                 ['label' => 'عدد المنتجات', 'value' => $rows->count()],
@@ -3417,10 +3428,10 @@ class AccountingPageController extends Controller
         $rows = Expense::with('expenseAccount')
             ->where('company_id', $company->id)
             ->whereBetween('expense_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
-            ->when($selectedExpenseId, fn ($query) => $query->where('id', $selectedExpenseId))
+            ->when($selectedExpenseId, fn($query) => $query->where('id', $selectedExpenseId))
             ->orderByDesc('expense_date')
             ->get()
-            ->map(fn (Expense $expense) => [
+            ->map(fn(Expense $expense) => [
                 'label' => $expense->name ?: ($expense->reference ?: 'مصروف #' . $expense->id),
                 'value' => (float) $expense->total,
                 'meta' => trim(implode(' | ', array_filter([
@@ -3436,7 +3447,7 @@ class AccountingPageController extends Controller
             'chart' => [
                 'type' => 'bar',
                 'labels' => $rows->pluck('label')->take(8)->values(),
-                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn($value) => round((float) $value, 2))->values(),
             ],
             'highlights' => [
                 ['label' => 'عدد المصروفات', 'value' => $rows->count()],
@@ -3454,12 +3465,12 @@ class AccountingPageController extends Controller
             ->where('invoices.company_id', $company->id)
             ->whereBetween('invoices.invoice_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
             ->where('invoices.balance_due', '>', 0)
-            ->when($selectedCustomerId, fn ($query) => $query->where('customers.id', $selectedCustomerId))
+            ->when($selectedCustomerId, fn($query) => $query->where('customers.id', $selectedCustomerId))
             ->groupBy('customers.id', 'customers.name')
             ->selectRaw('customers.name as label, SUM(invoices.balance_due) as balance_due, COUNT(invoices.id) as invoice_count')
             ->orderByDesc('balance_due')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn($row) => [
                 'label' => $row->label,
                 'value' => (float) $row->balance_due,
                 'meta' => 'عدد الفواتير المفتوحة: ' . $row->invoice_count,
@@ -3471,7 +3482,7 @@ class AccountingPageController extends Controller
             'chart' => [
                 'type' => 'bar',
                 'labels' => $rows->pluck('label')->take(8)->values(),
-                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn($value) => round((float) $value, 2))->values(),
             ],
             'highlights' => [
                 ['label' => 'عدد العملاء', 'value' => $rows->count()],
@@ -3489,12 +3500,12 @@ class AccountingPageController extends Controller
             ->where('purchases.company_id', $company->id)
             ->whereBetween('purchases.purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
             ->where('purchases.balance_due', '>', 0)
-            ->when($selectedSupplierId, fn ($query) => $query->where('suppliers.id', $selectedSupplierId))
+            ->when($selectedSupplierId, fn($query) => $query->where('suppliers.id', $selectedSupplierId))
             ->groupBy('suppliers.id', 'suppliers.name')
             ->selectRaw('suppliers.name as label, SUM(purchases.subtotal) as subtotal_amount, SUM(purchases.tax_amount) as tax_amount, SUM(purchases.total) as total_amount, SUM(purchases.balance_due) as balance_due, COUNT(purchases.id) as purchase_count')
             ->orderByDesc('balance_due')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn($row) => [
                 'label' => $row->label,
                 'value' => (float) $row->balance_due,
                 'meta' => sprintf(
@@ -3510,7 +3521,7 @@ class AccountingPageController extends Controller
             ->where('company_id', $company->id)
             ->whereBetween('purchase_date', [$dateFrom->toDateString(), $dateTo->toDateString()])
             ->where('balance_due', '>', 0)
-            ->when($selectedSupplierId, fn ($query) => $query->where('supplier_id', $selectedSupplierId))
+            ->when($selectedSupplierId, fn($query) => $query->where('supplier_id', $selectedSupplierId))
             ->selectRaw('COUNT(id) as purchase_count, SUM(subtotal) as subtotal_amount, SUM(tax_amount) as tax_amount, SUM(total) as total_amount, SUM(balance_due) as balance_due')
             ->first();
 
@@ -3520,7 +3531,7 @@ class AccountingPageController extends Controller
             'chart' => [
                 'type' => 'bar',
                 'labels' => $rows->pluck('label')->take(8)->values(),
-                'values' => $rows->pluck('value')->take(8)->map(fn ($value) => round((float) $value, 2))->values(),
+                'values' => $rows->pluck('value')->take(8)->map(fn($value) => round((float) $value, 2))->values(),
             ],
             'highlights' => [
                 ['label' => 'عدد الموردين', 'value' => $rows->count()],
@@ -3564,7 +3575,7 @@ class AccountingPageController extends Controller
             'chart' => [
                 'type' => 'bar',
                 'labels' => $rows->pluck('label')->values(),
-                'values' => $rows->pluck('value')->map(fn ($value) => round((float) $value, 2))->values(),
+                'values' => $rows->pluck('value')->map(fn($value) => round((float) $value, 2))->values(),
             ],
             'highlights' => [
                 ['label' => 'ضريبة المخرجات', 'value' => $outputVat],
@@ -3604,19 +3615,19 @@ class AccountingPageController extends Controller
         $validated = $request->validate([
             'customer_id' => [
                 'required',
-                Rule::exists('customers', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('customers', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'branch_id' => [
                 'nullable',
-                Rule::exists('branches', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('branches', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'employee_id' => [
                 'nullable',
-                Rule::exists('employees', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('employees', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'sales_channel_id' => [
                 'nullable',
-                Rule::exists('sales_channels', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('sales_channels', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'invoice_date' => ['required', 'date'],
             'due_date' => ['nullable', 'date', 'after_or_equal:invoice_date'],
@@ -3624,7 +3635,7 @@ class AccountingPageController extends Controller
             'payment_status' => ['nullable', Rule::in(['deferred', 'partial', 'full'])],
             'payment_account_id' => [
                 'nullable',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                Rule::exists('accounts', 'id')->where(fn($query) => $query
                     ->where('company_id', $companyId)
                     ->where('allows_direct_transactions', true)
                     ->where('is_active', true)),
@@ -3636,7 +3647,7 @@ class AccountingPageController extends Controller
             'item_product_id' => ['required', 'array', 'min:1'],
             'item_product_id.*' => [
                 'nullable',
-                Rule::exists('products', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('products', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'item_description' => ['required', 'array', 'min:1'],
             'item_description.*' => ['required', 'string', 'max:255'],
@@ -3652,7 +3663,7 @@ class AccountingPageController extends Controller
 
         $missingDefaults = [];
 
-        if (! $validated['sales_channel_id']) {
+        if (!$validated['sales_channel_id']) {
             $missingDefaults['sales_channel_id'] = 'لا توجد قناة بيع متاحة لحفظ عملية البيع. أضف قناة بيع أولاً.';
         }
 
@@ -3704,7 +3715,7 @@ class AccountingPageController extends Controller
             'reference' => ['nullable', 'string', 'max:100'],
             'description' => ['required', 'string', 'max:255'],
             'line_account' => ['required', 'array', 'min:2'],
-            'line_account.*' => ['nullable', Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId))],
+            'line_account.*' => ['nullable', Rule::exists('accounts', 'id')->where(fn($query) => $query->where('company_id', $companyId))],
             'line_description' => ['required', 'array', 'min:2'],
             'line_description.*' => ['nullable', 'string', 'max:255'],
             'line_debit' => ['required', 'array', 'min:2'],
@@ -3717,7 +3728,7 @@ class AccountingPageController extends Controller
     private function validateProductData(Request $request, int $companyId, ?Product $product = null): array
     {
         $uniqueCodeRule = Rule::unique('products', 'code')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         if ($product) {
             $uniqueCodeRule = $uniqueCodeRule->ignore($product->id);
@@ -3729,7 +3740,7 @@ class AccountingPageController extends Controller
             'name_ar' => ['nullable', 'string', 'max:255'],
             'supplier_id' => [
                 'nullable',
-                Rule::exists('suppliers', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('suppliers', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'code' => ['nullable', 'string', 'max:50', $uniqueCodeRule],
             'type' => ['required', Rule::in(['product', 'service'])],
@@ -3746,10 +3757,10 @@ class AccountingPageController extends Controller
     private function validateSupplierData(Request $request, int $companyId, ?Supplier $supplier = null): array
     {
         $uniqueCodeRule = Rule::unique('suppliers', 'code')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         $uniqueEmailRule = Rule::unique('suppliers', 'email')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         if ($supplier) {
             $uniqueCodeRule = $uniqueCodeRule->ignore($supplier->id);
@@ -3784,10 +3795,10 @@ class AccountingPageController extends Controller
     private function validateCustomerData(Request $request, int $companyId, ?Customer $customer = null): array
     {
         $uniqueCodeRule = Rule::unique('customers', 'code')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         $uniqueEmailRule = Rule::unique('customers', 'email')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         if ($customer) {
             $uniqueCodeRule = $uniqueCodeRule->ignore($customer->id);
@@ -3821,7 +3832,7 @@ class AccountingPageController extends Controller
     private function validateBranchData(Request $request, int $companyId, ?Branch $branch = null): array
     {
         $uniqueCodeRule = Rule::unique('branches', 'code')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         if ($branch) {
             $uniqueCodeRule = $uniqueCodeRule->ignore($branch->id);
@@ -3839,7 +3850,7 @@ class AccountingPageController extends Controller
     private function validateSalesChannelData(Request $request, int $companyId, ?SalesChannel $salesChannel = null): array
     {
         $uniqueCodeRule = Rule::unique('sales_channels', 'code')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         if ($salesChannel) {
             $uniqueCodeRule = $uniqueCodeRule->ignore($salesChannel->id);
@@ -3856,7 +3867,7 @@ class AccountingPageController extends Controller
     private function validateEmployeeData(Request $request, int $companyId, ?Employee $employee = null): array
     {
         $uniqueEmailRule = Rule::unique('employees', 'email')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         if ($employee) {
             $uniqueEmailRule = $uniqueEmailRule->ignore($employee->id);
@@ -3878,7 +3889,7 @@ class AccountingPageController extends Controller
             'employment_type' => ['nullable', Rule::in(['full_time', 'part_time', 'contract', 'temporary'])],
             'branch_id' => [
                 'required',
-                Rule::exists('branches', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('branches', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'notes' => ['nullable', 'string'],
         ]);
@@ -3902,7 +3913,7 @@ class AccountingPageController extends Controller
 
         $allowedCities = $this->cityOptionsForCountryCode($validated['country_code']);
 
-        if ($allowedCities !== [] && ! empty($validated['city']) && ! in_array($validated['city'], $allowedCities, true)) {
+        if ($allowedCities !== [] && !empty($validated['city']) && !in_array($validated['city'], $allowedCities, true)) {
             throw ValidationException::withMessages([
                 'city' => 'المدينة المحددة لا تتبع الدولة المختارة للشركة.',
             ]);
@@ -3913,7 +3924,7 @@ class AccountingPageController extends Controller
 
     private function branchPayload(array $validated, Company $company, ?Branch $branch = null): array
     {
-        $defaultBranch = ! $branch && ! Branch::query()->where('company_id', $company->id)->exists();
+        $defaultBranch = !$branch && !Branch::query()->where('company_id', $company->id)->exists();
 
         return [
             'company_id' => $company->id,
@@ -3926,7 +3937,7 @@ class AccountingPageController extends Controller
 
     private function salesChannelPayload(array $validated, Company $company, ?SalesChannel $salesChannel = null): array
     {
-        $defaultChannel = ! $salesChannel && ! SalesChannel::query()->where('company_id', $company->id)->exists();
+        $defaultChannel = !$salesChannel && !SalesChannel::query()->where('company_id', $company->id)->exists();
 
         return [
             'company_id' => $company->id,
@@ -3967,8 +3978,8 @@ class AccountingPageController extends Controller
 
     private function syncDefaultBranchFlag(Branch $branch, bool $shouldBeDefault): void
     {
-        if (! $shouldBeDefault) {
-            if (! Branch::query()->where('company_id', $branch->company_id)->where('is_default', true)->exists()) {
+        if (!$shouldBeDefault) {
+            if (!Branch::query()->where('company_id', $branch->company_id)->where('is_default', true)->exists()) {
                 $branch->forceFill(['is_default' => true])->save();
             }
 
@@ -3980,15 +3991,15 @@ class AccountingPageController extends Controller
             ->where('id', '!=', $branch->id)
             ->update(['is_default' => false]);
 
-        if (! $branch->is_default) {
+        if (!$branch->is_default) {
             $branch->forceFill(['is_default' => true])->save();
         }
     }
 
     private function syncDefaultSalesChannelFlag(SalesChannel $salesChannel, bool $shouldBeDefault): void
     {
-        if (! $shouldBeDefault) {
-            if (! SalesChannel::query()->where('company_id', $salesChannel->company_id)->where('is_default', true)->exists()) {
+        if (!$shouldBeDefault) {
+            if (!SalesChannel::query()->where('company_id', $salesChannel->company_id)->where('is_default', true)->exists()) {
                 $salesChannel->forceFill(['is_default' => true])->save();
             }
 
@@ -4000,7 +4011,7 @@ class AccountingPageController extends Controller
             ->where('id', '!=', $salesChannel->id)
             ->update(['is_default' => false]);
 
-        if (! $salesChannel->is_default) {
+        if (!$salesChannel->is_default) {
             $salesChannel->forceFill(['is_default' => true])->save();
         }
     }
@@ -4011,11 +4022,11 @@ class AccountingPageController extends Controller
             'vat_rate' => ['required', 'numeric', 'min:0', 'max:100'],
             'output_tax_account_id' => [
                 'required',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)->where('account_type', 'liability')),
+                Rule::exists('accounts', 'id')->where(fn($query) => $query->where('company_id', $companyId)->where('account_type', 'liability')),
             ],
             'input_tax_account_id' => [
                 'required',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('accounts', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
         ]);
     }
@@ -4027,11 +4038,11 @@ class AccountingPageController extends Controller
             'expense_date' => ['required', 'date'],
             'expense_account_id' => [
                 'required',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)->where('account_type', 'expense')),
+                Rule::exists('accounts', 'id')->where(fn($query) => $query->where('company_id', $companyId)->where('account_type', 'expense')),
             ],
             'payment_account_id' => [
                 'required',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                Rule::exists('accounts', 'id')->where(fn($query) => $query
                     ->where('company_id', $companyId)
                     ->where('allows_direct_transactions', true)
                     ->where('is_active', true)),
@@ -4046,7 +4057,7 @@ class AccountingPageController extends Controller
     private function validateAccountData(Request $request, int $companyId): array
     {
         $uniqueCodeRule = Rule::unique('accounts', 'code')
-            ->where(fn ($query) => $query->where('company_id', $companyId));
+            ->where(fn($query) => $query->where('company_id', $companyId));
 
         return $request->validate([
             'code' => ['required', 'string', 'max:20', $uniqueCodeRule],
@@ -4055,7 +4066,7 @@ class AccountingPageController extends Controller
             'account_type' => ['required', Rule::in(['asset', 'liability', 'equity', 'revenue', 'expense', 'cogs'])],
             'parent_id' => [
                 'nullable',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('accounts', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'description' => ['nullable', 'string'],
             'allows_direct_transactions' => ['nullable', 'boolean'],
@@ -4103,9 +4114,9 @@ class AccountingPageController extends Controller
                     mb_strtolower((string) $account->name_ar),
                 ];
 
-                $matchesSearch = collect($haystacks)->contains(fn (string $value) => str_contains($value, $search));
+                $matchesSearch = collect($haystacks)->contains(fn(string $value) => str_contains($value, $search));
 
-                if (! $matchesSearch) {
+                if (!$matchesSearch) {
                     return false;
                 }
             }
@@ -4150,7 +4161,7 @@ class AccountingPageController extends Controller
         }
 
         return $accounts
-            ->reject(fn (Account $account) => $this->isDynamicChartAccount($account))
+            ->reject(fn(Account $account) => $this->isDynamicChartAccount($account))
             ->values();
     }
 
@@ -4177,7 +4188,7 @@ class AccountingPageController extends Controller
             $visited[$currentParentId] = true;
             $parent = $accountsById->get($currentParentId);
 
-            if (! $parent) {
+            if (!$parent) {
                 break;
             }
 
@@ -4215,12 +4226,12 @@ class AccountingPageController extends Controller
                 $preCalculatedBalances[$account->id] = (float) $account->rolled_up_balance;
             }
         }
-        
+
         // Pre-calculate all rolled_up_balances in one pass (bottom-up approach)
-        $rolledUpBalances = !empty($preCalculatedBalances) 
-            ? $preCalculatedBalances 
+        $rolledUpBalances = !empty($preCalculatedBalances)
+            ? $preCalculatedBalances
             : $this->calculateAllRolledUpBalances($accounts);
-        
+
         // Build flat array with just essential data - NO CHILDREN to avoid memory issues
         $result = [];
         foreach ($accounts as $account) {
@@ -4242,10 +4253,10 @@ class AccountingPageController extends Controller
                 ];
             }
         }
-        
+
         // Sort by code
         usort($result, fn($a, $b) => strcmp($a['code'], $b['code']));
-        
+
         // Build lookup for all accounts (for finding children in view)
         $allAccountsById = [];
         foreach ($accounts as $account) {
@@ -4264,10 +4275,10 @@ class AccountingPageController extends Controller
                 'rolled_up_balance' => $rolledUpBalances[$account->id] ?? (float) $account->balance,
             ];
         }
-        
+
         // Store in view shared data instead of session
         view()->share('chartAccountsLookup', $allAccountsById);
-        
+
         return $result;
     }
 
@@ -4275,12 +4286,12 @@ class AccountingPageController extends Controller
     {
         $accountsById = $accounts->keyBy('id');
         $rolledUpBalances = [];
-        
+
         // Initialize with own balance for each account
         foreach ($accounts as $account) {
             $rolledUpBalances[$account->id] = (float) $account->balance;
         }
-        
+
         // Build parent-child relationships
         $childrenByParent = [];
         foreach ($accounts as $account) {
@@ -4291,7 +4302,7 @@ class AccountingPageController extends Controller
                 $childrenByParent[$account->parent_id][] = $account->id;
             }
         }
-        
+
         // Calculate rolled-up balances bottom-up (from leaves to root)
         // Process accounts in order from deepest to shallowest
         $accountsByDepth = [];
@@ -4302,7 +4313,7 @@ class AccountingPageController extends Controller
             }
             $accountsByDepth[$depth][] = $account->id;
         }
-        
+
         // Process from deepest to shallowest
         krsort($accountsByDepth);
         foreach ($accountsByDepth as $depth => $accountIds) {
@@ -4317,7 +4328,7 @@ class AccountingPageController extends Controller
                 }
             }
         }
-        
+
         return $rolledUpBalances;
     }
 
@@ -4326,7 +4337,7 @@ class AccountingPageController extends Controller
         $depth = 0;
         $current = $accountsById->get($accountId);
         $visited = [];
-        
+
         while ($current && !isset($visited[$current->id])) {
             $visited[$current->id] = true;
             if ($current->parent_id) {
@@ -4336,7 +4347,7 @@ class AccountingPageController extends Controller
                 break;
             }
         }
-        
+
         return $depth;
     }
 
@@ -4374,7 +4385,7 @@ class AccountingPageController extends Controller
 
         $code = $rootCodes[$type] ?? null;
 
-        if (! $code) {
+        if (!$code) {
             return null;
         }
 
@@ -4464,7 +4475,7 @@ class AccountingPageController extends Controller
             'supplier_invoice_number' => ['nullable', 'string', 'max:100'],
             'supplier_id' => [
                 'required',
-                Rule::exists('suppliers', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('suppliers', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'purchase_date' => ['required', 'date'],
             'due_date' => ['nullable', 'date', 'after_or_equal:purchase_date'],
@@ -4472,7 +4483,7 @@ class AccountingPageController extends Controller
             'payment_status' => ['required', Rule::in(['pending', 'partial', 'paid'])],
             'payment_account_id' => [
                 'nullable',
-                Rule::exists('accounts', 'id')->where(fn ($query) => $query
+                Rule::exists('accounts', 'id')->where(fn($query) => $query
                     ->where('company_id', $companyId)
                     ->where('allows_direct_transactions', true)
                     ->where('is_active', true)),
@@ -4484,7 +4495,7 @@ class AccountingPageController extends Controller
             'item_product_id' => ['required', 'array', 'min:1'],
             'item_product_id.*' => [
                 'nullable',
-                Rule::exists('products', 'id')->where(fn ($query) => $query->where('company_id', $companyId)),
+                Rule::exists('products', 'id')->where(fn($query) => $query->where('company_id', $companyId)),
             ],
             'item_description' => ['required', 'array', 'min:1'],
             'item_description.*' => ['required', 'string', 'max:255'],
@@ -4630,13 +4641,13 @@ class AccountingPageController extends Controller
 
     private function handlePurchaseAttachmentUpload(Request $request, ?Purchase $purchase = null): ?string
     {
-        if (! $request->hasFile('attachment')) {
+        if (!$request->hasFile('attachment')) {
             return $purchase?->attachment_path;
         }
 
         $file = $request->file('attachment');
 
-        if (! $file || ! $file->isValid()) {
+        if (!$file || !$file->isValid()) {
             return $purchase?->attachment_path;
         }
 
@@ -4649,13 +4660,13 @@ class AccountingPageController extends Controller
 
     private function handleInvoiceAttachmentUpload(Request $request, ?Invoice $invoice = null): ?string
     {
-        if (! $request->hasFile('attachment')) {
+        if (!$request->hasFile('attachment')) {
             return $invoice?->attachment_path;
         }
 
         $file = $request->file('attachment');
 
-        if (! $file || ! $file->isValid()) {
+        if (!$file || !$file->isValid()) {
             return $invoice?->attachment_path;
         }
 
@@ -4817,7 +4828,7 @@ class AccountingPageController extends Controller
                 continue;
             }
 
-            if (! isset($requirements[$productId])) {
+            if (!isset($requirements[$productId])) {
                 $requirements[$productId] = [
                     'requested' => 0.0,
                     'line_indexes' => [],
@@ -4848,7 +4859,7 @@ class AccountingPageController extends Controller
                 continue;
             }
 
-            if (! isset($requirements[$productId])) {
+            if (!isset($requirements[$productId])) {
                 $requirements[$productId] = [
                     'requested' => 0.0,
                     'line_indexes' => [],
@@ -4874,7 +4885,7 @@ class AccountingPageController extends Controller
                 continue;
             }
 
-            if (! isset($requirements[$productId])) {
+            if (!isset($requirements[$productId])) {
                 $requirements[$productId] = [
                     'requested' => 0.0,
                     'line_indexes' => [],
@@ -4905,7 +4916,7 @@ class AccountingPageController extends Controller
                 continue;
             }
 
-            if (! isset($requirements[$productId])) {
+            if (!isset($requirements[$productId])) {
                 $requirements[$productId] = [
                     'requested' => 0.0,
                     'line_indexes' => [],
@@ -4938,7 +4949,7 @@ class AccountingPageController extends Controller
             /** @var Product|null $product */
             $product = $products->get($productId);
 
-            if (! $product || $product->type === 'service') {
+            if (!$product || $product->type === 'service') {
                 continue;
             }
 
@@ -4988,7 +4999,7 @@ class AccountingPageController extends Controller
             /** @var Product|null $product */
             $product = $products->get($productId);
 
-            if (! $product || $product->type === 'service') {
+            if (!$product || $product->type === 'service') {
                 continue;
             }
 
@@ -5040,7 +5051,7 @@ class AccountingPageController extends Controller
             /** @var Product|null $product */
             $product = $products->get($productId);
 
-            if (! $product || $product->type === 'service') {
+            if (!$product || $product->type === 'service') {
                 continue;
             }
 
@@ -5068,7 +5079,7 @@ class AccountingPageController extends Controller
             /** @var Product|null $product */
             $product = $products->get($productId);
 
-            if (! $product || $product->type === 'service') {
+            if (!$product || $product->type === 'service') {
                 continue;
             }
 
@@ -5096,7 +5107,7 @@ class AccountingPageController extends Controller
             /** @var Product|null $product */
             $product = $products->get($productId);
 
-            if (! $product || $product->type === 'service') {
+            if (!$product || $product->type === 'service') {
                 continue;
             }
 
@@ -5156,13 +5167,13 @@ class AccountingPageController extends Controller
             $branchId = $employee?->branch?->id ?: $this->defaultBranchId($companyId);
             $branch = $employee?->branch;
 
-            if (! $branch && $branchId) {
+            if (!$branch && $branchId) {
                 $branch = Branch::query()
                     ->where('company_id', $companyId)
                     ->find($branchId);
             }
 
-            if (! $branch) {
+            if (!$branch) {
                 throw ValidationException::withMessages([
                     'branch_id' => 'لا يوجد فرع افتراضي متاح لمالك الشركة لتسجيل عملية البيع.',
                 ]);
@@ -5178,7 +5189,7 @@ class AccountingPageController extends Controller
             ];
         }
 
-        if (! $employee || (int) $employee->company_id !== (int) $companyId) {
+        if (!$employee || (int) $employee->company_id !== (int) $companyId) {
             throw ValidationException::withMessages([
                 'employee_id' => 'يجب ربط المستخدم الحالي بموظف قبل تسجيل عملية بيع.',
             ]);
@@ -5186,7 +5197,7 @@ class AccountingPageController extends Controller
 
         $branch = $employee->branch;
 
-        if (! $branch || (int) $branch->company_id !== (int) $companyId) {
+        if (!$branch || (int) $branch->company_id !== (int) $companyId) {
             throw ValidationException::withMessages([
                 'branch_id' => 'الموظف المرتبط بالمستخدم الحالي يجب أن يكون تابعًا لفرع صالح قبل تسجيل عملية بيع.',
             ]);
@@ -5223,7 +5234,7 @@ class AccountingPageController extends Controller
         $linkedEmployee = $invoice?->employee ?? $user->employee;
         $linkedBranch = $invoice?->branch ?? $linkedEmployee?->branch;
 
-        if (! $linkedBranch && ($user->hasRole(\App\Support\AccessControl::ROLE_OWNER) || $user->role === \App\Support\AccessControl::ROLE_OWNER)) {
+        if (!$linkedBranch && ($user->hasRole(\App\Support\AccessControl::ROLE_OWNER) || $user->role === \App\Support\AccessControl::ROLE_OWNER)) {
             $defaultBranchId = $this->defaultBranchId((int) $user->company_id);
             $linkedBranch = $defaultBranchId
                 ? Branch::query()->where('company_id', $user->company_id)->find($defaultBranchId)
@@ -5232,9 +5243,9 @@ class AccountingPageController extends Controller
 
         $warning = null;
 
-        if (! $linkedBranch) {
+        if (!$linkedBranch) {
             $warning = 'لا يوجد فرع افتراضي صالح لتسجيل المبيعات لهذا الحساب.';
-        } elseif (! $linkedEmployee && ! ($user->hasRole(\App\Support\AccessControl::ROLE_OWNER) || $user->role === \App\Support\AccessControl::ROLE_OWNER)) {
+        } elseif (!$linkedEmployee && !($user->hasRole(\App\Support\AccessControl::ROLE_OWNER) || $user->role === \App\Support\AccessControl::ROLE_OWNER)) {
             $warning = 'هذا المستخدم غير مرتبط بعد بموظف وفرع صالحين. لن يمكن حفظ المبيعات حتى يتم الربط من شاشة المستخدمين والموظفين.';
         }
 
@@ -5346,11 +5357,11 @@ class AccountingPageController extends Controller
             $credit = round((float) ($validated['line_credit'][$index] ?? 0), 2);
             $hasValue = $accountId || $description !== '' || $debit > 0 || $credit > 0;
 
-            if (! $hasValue) {
+            if (!$hasValue) {
                 continue;
             }
 
-            if (! $accountId) {
+            if (!$accountId) {
                 throw ValidationException::withMessages([
                     'line_account.' . $index => 'يجب اختيار حساب لكل بند يحتوي وصفًا أو مبلغًا.',
                 ]);
@@ -5389,7 +5400,7 @@ class AccountingPageController extends Controller
     {
         $sourceType = $journalEntry->source_type;
 
-        if (! $sourceType) {
+        if (!$sourceType) {
             return [
                 'label' => 'قيد يدوي',
                 'route' => null,
